@@ -7,19 +7,36 @@ let mainWindow;
 let ruckusClient = null;
 let poeQueryCancelled = false;
 
+// Dev-only PNG; packaged macOS apps use the .icns from the app bundle.
+function getDevIconPath() {
+  const iconPath = path.join(__dirname, 'build', 'icon.png');
+  return fs.existsSync(iconPath) ? iconPath : null;
+}
+
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  const icon = getDevIconPath();
+  const options = {
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    icon: path.join(__dirname, 'build', 'icon.png'),
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false
     },
     title: 'Ruckus One AP Mapper'
+  };
+  if (icon) {
+    options.icon = icon;
+  }
+
+  mainWindow = new BrowserWindow(options);
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    mainWindow.focus();
   });
 
   mainWindow.loadFile('src/index.html');
@@ -34,8 +51,13 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  if (process.platform === 'darwin' && app.dock) {
-    app.dock.setIcon(path.join(__dirname, 'build', 'icon.png'));
+  const icon = getDevIconPath();
+  if (process.platform === 'darwin' && app.dock && icon) {
+    try {
+      app.dock.setIcon(icon);
+    } catch (error) {
+      console.error('Failed to set dock icon:', error);
+    }
   }
 
   createWindow();
@@ -45,6 +67,14 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
 });
 
 app.on('window-all-closed', () => {

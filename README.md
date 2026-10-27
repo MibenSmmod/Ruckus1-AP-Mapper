@@ -8,13 +8,13 @@ This is an unofficial, community-developed tool and is not affiliated with Belde
 
 Installers are on the **[Releases](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases)** page (also linked in the repo sidebar under **About**).
 
-**Latest (v1.1.1):**
+**Latest (v1.1.2):**
 
 | Platform | Download |
 |----------|----------|
-| macOS (Apple Silicon) | [Ruckus One AP Mapper-1.1.1-arm64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.1.1/Ruckus.One.AP.Mapper-1.1.1-arm64.dmg) |
-| macOS (Intel) | [Ruckus One AP Mapper-1.1.1-x64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.1.1/Ruckus.One.AP.Mapper-1.1.1-x64.dmg) |
-| Windows (x64) | [Ruckus One AP Mapper-1.1.1-Setup.exe](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.1.1/Ruckus.One.AP.Mapper-1.1.1-Setup.exe) |
+| macOS (Apple Silicon) | [Ruckus One AP Mapper-1.1.2-arm64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.1.2/Ruckus.One.AP.Mapper-1.1.2-arm64.dmg) |
+| macOS (Intel) | [Ruckus One AP Mapper-1.1.2-x64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.1.2/Ruckus.One.AP.Mapper-1.1.2-x64.dmg) |
+| Windows (x64) | [Ruckus One AP Mapper-1.1.2-Setup.exe](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.1.2/Ruckus.One.AP.Mapper-1.1.2-Setup.exe) |
 
 On macOS, the app is unsigned — right-click the app and choose **Open** the first time, or allow it in **System Settings → Privacy & Security**.
 
