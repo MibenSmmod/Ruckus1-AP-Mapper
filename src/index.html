@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+  <title>Ruckus One AP Mapper</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen active">
+      <div class="login-container">
+        <h1>Ruckus One AP Mapper</h1>
+        <p class="subtitle">Enter API info to access your R1 account</p>
+        <p class="example-link-row">
+          <button type="button" id="view-example-btn" class="link-button">See an example map</button>
+        </p>
+
+        <form id="login-form">
+          <div class="form-group">
+            <label for="region">Region</label>
+            <select id="region" required>
+              <option value="na">North America</option>
+              <option value="eu">Europe</option>
+              <option value="asia">Asia</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="tenant-id">Tenant ID</label>
+            <input type="text" id="tenant-id" placeholder="Enter Tenant ID" required>
+          </div>
+
+          <div class="form-group">
+            <label for="client-id">Client ID</label>
+            <input type="text" id="client-id" placeholder="Enter Client ID" required>
+          </div>
+
+          <div class="form-group">
+            <label for="client-secret">Client Secret</label>
+            <div class="password-input-wrapper">
+              <input type="password" id="client-secret" placeholder="Enter Client Secret" required>
+              <button type="button" id="toggle-client-secret" class="password-toggle" aria-label="Show client secret" title="Show client secret">
+                <svg class="eye-icon eye-open" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 5c-5 0-9.27 3.11-11 7 1.73 3.89 6 7 11 7s9.27-3.11 11-7c-1.73-3.89-6-7-11-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>
+                </svg>
+                <svg class="eye-icon eye-closed hidden" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 5c-5 0-9.27 3.11-11 7 1.73 3.89 6 7 11 7s9.27-3.11 11-7c-1.73-3.89-6-7-11-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>
+                  <path d="M3 3l18 18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group checkbox">
+            <input type="checkbox" id="save-credentials">
+            <label for="save-credentials">Save credentials</label>
+          </div>
+
+          <div class="button-row">
+            <button type="submit" id="connect-btn" class="btn primary">Connect</button>
+            <button type="button" id="clear-btn" class="btn secondary">Clear</button>
+          </div>
+
+          <div id="login-error" class="error-message hidden"></div>
+        </form>
+
+        <details class="help-section">
+          <summary>About</summary>
+          <div class="help-content">
+            <p>This app requires a <strong>RUCKUS One account</strong> at <strong>https://ruckus.cloud/</strong> and uses APIs to gather data about your network.</p>
+
+            <p>This app provides a way to view all access points on a map within a venue, displaying RF information such as Channel, Bandwidth, and Transmit Power. As a bonus, you can see if there are radios disabled.</p>
+
+            <p>You can get this information using <strong>R1 &gt; Venues &gt; Choose Venue &gt; Overview</strong> tab, but you must click each AP to get the data. With high-density floor plans, this app helps you search and find your access point by hostname or serial number quickly.</p>
+
+            <p>Written by Mike Rieben, Ruckus Systems Engineer October 2026 and will be provided open source on my github page: <a href="https://github.com/MibenSmmod/Ruckus1-AP-Mapper/" target="_blank" rel="noopener noreferrer">https://github.com/MibenSmmod/Ruckus1-AP-Mapper/</a>. Connect with me on LinkedIn: <a href="https://www.linkedin.com/in/mikerieben/" target="_blank" rel="noopener noreferrer">https://www.linkedin.com/in/mikerieben/</a></p>
+          </div>
+        </details>
+
+        <details class="help-section">
+          <summary>How to get your API credentials</summary>
+          <div class="help-content">
+            <h4>Application Token</h4>
+            <ol>
+              <li>Navigate to <strong>https://ruckus.cloud</strong> and login</li>
+              <li>Menu: <strong>Administration</strong> &gt; <strong>Account Management</strong> &gt; <strong>Settings</strong></li>
+              <li>Scroll down to <strong>Application Tokens</strong></li>
+              <li>Click <strong>Add Token</strong> link (far right)</li>
+              <li>Enter a name (e.g., "Ruckus One AP Mapper")</li>
+              <li>Scope: select <strong>Read Only</strong>(Recommended)</li>
+              <li>Press <strong>Add</strong> button</li>
+              <li>Copy the <strong>Client ID</strong> and <strong>Shared Secret</strong></li>
+            </ol>
+
+            <h4>Tenant ID</h4>
+            <p>Found in two places:</p>
+            <ol>
+              <li>In the URL after logging in</li>
+              <li>Click your initials (top right) &gt; <strong>User Profile</strong> &gt; Copy the ID</li>
+            </ol>
+          </div>
+        </details>
+
+        <div class="disclaimer-section">
+          <details>
+            <summary>Disclaimer & Terms of Use</summary>
+            <div class="disclaimer-content">
+              <p><strong>Unofficial Application</strong></p>
+              <p>This application is an unofficial, community-developed tool and is not affiliated with, endorsed by, or associated with Belden Inc., Ruckus a Belden Brand, or any of their subsidiaries. "Ruckus," "Ruckus One," and related product names are trademarks of their respective owners.</p>
+
+              <p><strong>No Warranty</strong></p>
+              <p>This application is provided "AS IS" without warranty of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, and noninfringement. The authors and contributors make no representation or warranty that the application will meet your requirements or operate uninterrupted or error-free.</p>
+
+              <p><strong>Limitation of Liability</strong></p>
+              <p>In no event shall the authors, contributors, or copyright holders be liable for any claim, damages, or other liability arising from the use or operation of this application, or the inability to use the application, even if advised of the possibility of such damages.</p>
+
+              <p><strong>User Responsibility</strong></p>
+              <p>The user assumes all responsibility and risk for the use of this application, including any technical issues, data loss, or security concerns. Users should review their own security policies before entering credentials.</p>
+            </div>
+          </details>
+        </div>
+
+        <div class="version-info">v1.0.0</div>
+      </div>
+    </div>
+
+    <!-- Venue Selection Screen -->
+    <div id="venue-screen" class="screen">
+      <div class="header">
+        <h2>Select Venue</h2>
+        <button id="logout-btn" class="btn secondary">Logout</button>
+      </div>
+
+      <div class="content">
+        <div id="venue-loading" class="loading">Loading venues...</div>
+        <div id="venue-list" class="list-container hidden"></div>
+        <div id="venue-error" class="error-message hidden"></div>
+      </div>
+    </div>
+
+    <!-- Floor Plan Selection Screen -->
+    <div id="floorplan-screen" class="screen">
+      <div class="header">
+        <button id="back-to-venues" class="btn secondary">Back</button>
+        <h2 id="venue-name">Floor Plans</h2>
+        <button id="logout-btn-2" class="btn secondary">Logout</button>
+      </div>
+
+      <div class="content">
+        <div id="floorplan-loading" class="loading">Loading floor plans...</div>
+        <div id="floorplan-list" class="list-container hidden"></div>
+        <div id="floorplan-error" class="error-message hidden"></div>
+      </div>
+    </div>
+
+    <!-- Floor Plan View Screen -->
+    <div id="map-screen" class="screen">
+      <div class="header">
+        <button id="back-to-floorplans" class="btn secondary">Back</button>
+        <h2 id="floorplan-name">Floor Plan</h2>
+        <div class="header-actions">
+          <span id="ap-count" class="ap-count"></span>
+          <button id="logout-btn-3" class="btn secondary">Logout</button>
+        </div>
+      </div>
+
+      <div class="map-container">
+        <div id="map-loading" class="loading">Loading floor plan...</div>
+        <canvas id="floor-plan-canvas"></canvas>
+
+        <!-- Floating Search Panel -->
+        <div class="floating-search-panel">
+          <button id="ap-search-toggle" class="search-icon-btn" title="Search AP">🔍</button>
+          <div id="ap-search-popup" class="ap-search-popup hidden">
+            <div class="search-input-wrapper">
+              <input type="text" id="ap-search" class="ap-search-input" placeholder="Search hostname or serial...">
+              <button id="ap-search-clear" class="search-clear-btn" title="Clear search">&times;</button>
+            </div>
+            <div id="ap-search-dropdown" class="ap-search-dropdown hidden"></div>
+          </div>
+        </div>
+
+        <!-- Refresh Control -->
+        <div class="floating-refresh-panel">
+          <button id="refresh-btn" class="refresh-icon-btn" title="Refresh API Calls">↻</button>
+        </div>
+
+        <!-- PoE Query -->
+        <div class="floating-poe-panel">
+          <button id="poe-query-btn" class="poe-icon-btn" title="Query PoE">🔌</button>
+        </div>
+
+        <!-- Settings Menu -->
+        <div class="floating-settings-panel">
+          <button id="settings-btn" class="settings-icon-btn" title="Settings">⚙</button>
+          <div id="settings-menu" class="settings-menu hidden">
+            <div class="settings-menu-item" id="toggle-hostname">
+              <span class="settings-menu-check" id="hostname-check">☑</span>
+              <span>Display Hostname</span>
+            </div>
+            <div class="settings-menu-item" id="toggle-poe">
+              <span class="settings-menu-check" id="poe-check">☐</span>
+              <span>Display PoE Level</span>
+            </div>
+            <div class="settings-menu-item" id="toggle-hide-switches">
+              <span class="settings-menu-check" id="hide-switches-check">☐</span>
+              <span>Hide Switches</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Zoom Controls -->
+        <div class="zoom-controls">
+          <button id="zoom-in-btn" title="Zoom In">+</button>
+          <button id="zoom-reset-btn" title="Reset Zoom">&#x27F3;</button>
+          <button id="zoom-out-btn" title="Zoom Out">&minus;</button>
+        </div>
+
+        <!-- Font Size Controls -->
+        <div class="font-size-controls">
+          <button id="font-size-small-btn" class="font-size-btn active" title="Small Font">A</button>
+          <button id="font-size-medium-btn" class="font-size-btn" title="Medium Font"><strong>A</strong></button>
+          <button id="font-size-large-btn" class="font-size-btn" title="Large Font"><strong style="font-size: 1.2em;">A</strong></button>
+        </div>
+
+        <!-- Channel Legend -->
+        <div class="map-legend">
+          <div class="legend-title">LEGEND</div>
+          <div class="legend-format">Band: Channel / Bandwidth / TxPower</div>
+          <div class="legend-items">
+            <div class="legend-item">
+              <span class="legend-color" style="background-color: #2196F3;"></span>
+              <span class="legend-label">2.4G</span>
+              <span class="legend-example">e.g., 6/20/17</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-color" style="background-color: #9C27B0;"></span>
+              <span class="legend-label">5G</span>
+              <span class="legend-example">e.g., 149/80/20</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-color" style="background-color: #FF5722;"></span>
+              <span class="legend-label">6G</span>
+              <span class="legend-example">e.g., 21/160/24</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AP Details Popup -->
+      <div id="ap-popup" class="popup hidden">
+        <div class="popup-content">
+          <button id="close-popup" class="close-btn">&times;</button>
+          <h3 id="ap-name">Access Point</h3>
+          <div class="ap-details">
+            <div class="detail-row">
+              <span class="label">MAC Address:</span>
+              <span id="ap-mac" class="value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">IP Address:</span>
+              <span id="ap-ip" class="value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Status:</span>
+              <span id="ap-status" class="value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Model:</span>
+              <span id="ap-model" class="value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Serial:</span>
+              <span id="ap-serial" class="value"></span>
+            </div>
+            <div class="detail-row popup-action-row">
+              <button id="ap-poe-query-btn" class="btn primary" disabled>Query PoE Type</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Switch Details Popup -->
+      <div id="switch-popup" class="popup hidden">
+        <div class="popup-content">
+          <button id="close-switch-popup" class="close-btn">&times;</button>
+          <h3 id="switch-name">Switch</h3>
+          <div class="ap-details">
+            <div class="detail-row">
+              <span class="label">Model:</span>
+              <span id="switch-model" class="value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">MAC Address:</span>
+              <span id="switch-mac" class="value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">IP Address:</span>
+              <span id="switch-ip" class="value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Status:</span>
+              <span id="switch-status" class="value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Incidents (Last 24 hrs):</span>
+              <span id="switch-incidents" class="value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Uptime:</span>
+              <span id="switch-uptime" class="value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="label">Clients Connected:</span>
+              <span id="switch-clients" class="value"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Example Map Modal -->
+    <div id="example-modal" class="modal hidden">
+      <div class="modal-content example-modal-content">
+        <div class="example-modal-header">
+          <h2>Example Floor Plan View</h2>
+          <button type="button" id="close-example-btn" class="example-close-btn" aria-label="Close example">&times;</button>
+        </div>
+        <p class="example-modal-desc">Access points with RF details (channel / bandwidth / Tx power), optional PoE info, and switches on a venue floor plan.</p>
+        <div class="example-image-wrap">
+          <img src="assets/example-map.jpg" alt="Example Ruckus One AP Mapper floor plan with access points and RF overlays">
+        </div>
+        <div class="modal-buttons">
+          <button type="button" id="example-back-btn" class="btn primary">Back to Login</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PoE Progress Modal -->
+    <div id="poe-progress-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>Querying PoE</h2>
+        <p>Reading negotiated PoE from RUCKUS One (AP LLDP and switch ports)...</p>
+        <div class="progress-container">
+          <div class="progress-bar">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+          <div id="progress-text" class="progress-text">0 of 0 APs queried</div>
+        </div>
+        <p id="current-ap-text" class="current-ap-text">Connecting to AP...</p>
+        <div class="modal-buttons">
+          <button id="poe-cancel-btn" class="btn secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PoE Cache Choice Modal -->
+    <div id="poe-cache-choice-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>PoE Data Available</h2>
+        <p>This floor plan already has cached PoE data from a previous query.</p>
+        <div class="info-box">
+          <p>Would you like to:</p>
+          <ul>
+            <li><strong>Display cached data</strong> — Use previously queried PoE information (instant)</li>
+            <li><strong>Query again</strong> — Fetch fresh PoE data from RUCKUS One (LLDP refresh, then switch ports)</li>
+          </ul>
+        </div>
+        <div class="modal-buttons">
+          <button id="use-cache-btn" class="btn primary">Display Cached Data</button>
+          <button id="query-again-btn" class="btn secondary">Query Again</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SSH Confirmation Modal -->
+    <div id="ssh-confirmation-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>Query PoE from RUCKUS One</h2>
+        <p>PoE is read from the RUCKUS One cloud API. No SSH session to the access points is opened.</p>
+        <div class="info-box">
+          <strong>What will happen:</strong>
+          <ul>
+            <li>Each operational AP is asked to refresh LLDP (the same call the RUCKUS One UI makes; it does not change AP configuration)</li>
+            <li>Negotiated class and allocated power are read from the AP neighbor table</li>
+            <li>The AP is matched to its ICX switch port for PoE type, draw, and budget</li>
+            <li>The map shows the power standard, class, and watts (for example, 802.3bt C6 45W)</li>
+          </ul>
+        </div>
+        <div class="modal-buttons">
+          <button id="ssh-confirm-btn" class="btn primary">Query PoE</button>
+          <button id="ssh-cancel-btn" class="btn secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
