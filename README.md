@@ -4,6 +4,19 @@ Desktop app for viewing Ruckus ONE access points on venue floor plans, with RF d
 
 This is an unofficial, community-developed tool and is not affiliated with Belden Inc. or Ruckus a Belden Brand.
 
+## Download
+
+Installers are on the **[Releases](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases)** page (also linked in the repo sidebar under **About**).
+
+**Latest (v1.1.0):**
+
+| Platform | Download |
+|----------|----------|
+| macOS (Apple Silicon) | [Ruckus One AP Mapper-1.1.0-arm64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.1.0/Ruckus.One.AP.Mapper-1.1.0-arm64.dmg) |
+| Windows (x64) | [Ruckus One AP Mapper-1.1.0-Setup.exe](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.1.0/Ruckus.One.AP.Mapper-1.1.0-Setup.exe) |
+
+On macOS, the app is unsigned — right-click the app and choose **Open** the first time, or allow it in **System Settings → Privacy & Security**.
+
 ## Features
 
 - Sign in with Ruckus ONE API credentials (region, tenant ID, client ID, client secret)
@@ -15,11 +28,11 @@ This is an unofficial, community-developed tool and is not affiliated with Belde
 
 ## Requirements
 
-- Node.js 18 or higher
 - A Ruckus ONE account at [https://ruckus.cloud/](https://ruckus.cloud/)
 - An Application Token (Read Only recommended) and Tenant ID
+- For running from source: Node.js 18 or higher
 
-## Setup
+## Run from source
 
 ```bash
 npm install
