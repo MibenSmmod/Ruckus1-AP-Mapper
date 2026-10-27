@@ -1,6 +1,6 @@
 {
   "name": "ruckus-one-ap-mapper",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Desktop application for visualizing Ruckus ONE access point locations on venue floor plans",
   "main": "main.js",
   "scripts": {

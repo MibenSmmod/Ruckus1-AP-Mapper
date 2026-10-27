@@ -1,13 +1,13 @@
 #!/bin/bash
 # Test Ruckus ONE API Authentication
-# Usage: ./test-auth.sh <client_id> <client_secret>
+# Usage: ./test-auth.sh <tenant_id> <client_id> <client_secret>
 
-CLIENT_ID="$1"
-CLIENT_SECRET="$2"
-TENANT_ID="<REDACTED>"
+TENANT_ID="$1"
+CLIENT_ID="$2"
+CLIENT_SECRET="$3"
 
-if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ]; then
-    echo "Usage: ./test-auth.sh <client_id> <client_secret>"
+if [ -z "$TENANT_ID" ] || [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ]; then
+    echo "Usage: ./test-auth.sh <tenant_id> <client_id> <client_secret>"
     exit 1
 fi
 
