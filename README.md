@@ -1,6 +1,6 @@
 # Ruckus One AP Mapper
 
-Desktop app for viewing Ruckus ONE access points on venue floor plans, with RF details (channel, bandwidth, transmit power) and optional PoE information.
+Desktop app for viewing Ruckus ONE access points on venue floor plans, with RF details (channel, bandwidth, transmit power) and optional PoE information.  Adds AFC power state if 6GHz is enabled.  This gives you a holistic view of all devices on a floor plan with RF info at a glance.
 
 This is an unofficial, community-developed tool and is not affiliated with Belden Inc. or Ruckus a Belden Brand.
 
@@ -26,6 +26,7 @@ On macOS, the app is unsigned — right-click the app and choose **Open** the fi
 - Optional hostname and PoE level display
 - Search APs by hostname or serial number
 - Zoom, pan, and font-size controls
+- Click device icon for more information (IP address, MAC address, etc.)
 
 ## Screenshots
 
