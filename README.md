@@ -46,6 +46,14 @@ On macOS, the app is unsigned — right-click the app and choose **Open** the fi
 
 ![Map view with APs, switches, and PoE](screenshots/04-map-view.png)
 
+### AP details
+
+![AP details popup](screenshots/05-ap-details.png)
+
+### Switch details
+
+![Switch details popup](screenshots/06-switch-details.png)
+
 ## Requirements
 
 - A Ruckus ONE account at [https://ruckus.cloud/](https://ruckus.cloud/)
