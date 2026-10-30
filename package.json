@@ -1,14 +1,15 @@
 {
   "name": "ruckus-one-ap-mapper",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "Desktop application for visualizing Ruckus ONE access point locations on venue floor plans",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --mac",
-    "build:dmg": "electron-builder --mac dmg",
-    "build:win": "electron-builder --win",
-    "build:all": "electron-builder --mac --win",
+    "prebuild": "node scripts/prebuild-check-credentials.js",
+    "build": "npm run prebuild && electron-builder --mac",
+    "build:dmg": "npm run prebuild && electron-builder --mac dmg",
+    "build:win": "npm run prebuild && electron-builder --win",
+    "build:all": "npm run prebuild && electron-builder --mac --win",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -52,7 +53,13 @@
     "files": [
       "main.js",
       "preload.js",
-      "src/**/*"
+      "src/**/*",
+      "!config.json",
+      "!**/config.json",
+      "!.env",
+      "!.env.*",
+      "!credentials.json",
+      "!scripts/**/*"
     ],
     "directories": {
       "output": "dist"

@@ -30,9 +30,25 @@ npm install
 # Run the application
 npm start
 
+# Credential safety check (also runs automatically before every build)
+npm run prebuild
+
+# Build installers (mac / Windows / both)
+npm run build:dmg
+npm run build:win
+npm run build:all
+
 # Run tests (not yet configured)
 npm test
 ```
+
+## Build safety — never package credentials
+
+- Tenant ID, Client ID, and Client Secret must never appear in source, git, or installers.
+- Saved credentials live only in Electron userData (`config.json` under the app’s Application Support folder), not inside the DMG/EXE.
+- Before every build/release: run `npm run prebuild`. It fails if project-root `config.json` / `.env` exists, if login inputs are pre-filled, or if `config.json` is not excluded from `build.files`.
+- Seeing a pre-filled login form after opening a local build usually means userData on this machine — not that the installer contains secrets. Clear userData when verifying a clean package.
+- If credentials may have shipped: delete the GitHub release/tag, bump the version, rebuild, and rotate the RUCKUS One Application Token.
 
 ## Requirements
 
