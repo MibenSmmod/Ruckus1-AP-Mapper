@@ -27,6 +27,24 @@ On macOS, the app is unsigned — right-click the app and choose **Open** the fi
 - Search APs by hostname or serial number
 - Zoom, pan, and font-size controls
 
+## Screenshots
+
+### Login
+
+![Login screen](screenshots/01-login.png)
+
+### Select venue
+
+![Select venue](screenshots/02-select-venue.png)
+
+### Select floor plan
+
+![Select floor plan](screenshots/03-select-floor-plan.png)
+
+### Map view
+
+![Map view with APs, switches, and PoE](screenshots/04-map-view.png)
+
 ## Requirements
 
 - A Ruckus ONE account at [https://ruckus.cloud/](https://ruckus.cloud/)
