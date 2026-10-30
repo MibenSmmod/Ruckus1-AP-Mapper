@@ -1,11 +1,114 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const RuckusAPI = require('./src/api/ruckus');
+const { checkForUpdates } = require('./src/updater');
+
+const APP_DISPLAY_NAME = 'Ruckus One AP Mapper';
 
 let mainWindow;
 let ruckusClient = null;
 let poeQueryCancelled = false;
+
+function createApplicationMenu() {
+  const isMac = process.platform === 'darwin';
+  const checkUpdatesItem = {
+    label: 'Check for Updates…',
+    click: () => {
+      checkForUpdates().catch((error) => {
+        console.error('[updater] Menu check failed:', error);
+      });
+    }
+  };
+
+  const template = [
+    ...(isMac
+      ? [{
+          label: APP_DISPLAY_NAME,
+          submenu: [
+            { role: 'about' },
+            { type: 'separator' },
+            checkUpdatesItem,
+            { type: 'separator' },
+            { role: 'services' },
+            { type: 'separator' },
+            { role: 'hide' },
+            { role: 'hideOthers' },
+            { role: 'unhide' },
+            { type: 'separator' },
+            { role: 'quit' }
+          ]
+        }]
+      : []),
+    {
+      label: 'File',
+      submenu: [
+        ...(!isMac ? [checkUpdatesItem, { type: 'separator' }] : []),
+        isMac ? { role: 'close' } : { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        ...(isMac
+          ? [
+              { role: 'pasteAndMatchStyle' },
+              { role: 'delete' },
+              { role: 'selectAll' },
+              { type: 'separator' },
+              {
+                label: 'Speech',
+                submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }]
+              }
+            ]
+          : [{ role: 'delete' }, { type: 'separator' }, { role: 'selectAll' }])
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        ...(isMac
+          ? [{ type: 'separator' }, { role: 'front' }]
+          : [{ role: 'close' }])
+      ]
+    },
+    {
+      role: 'help',
+      submenu: [
+        {
+          label: 'GitHub Releases',
+          click: async () => {
+            await shell.openExternal('https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases');
+          }
+        }
+      ]
+    }
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 // Dev-only PNG; packaged macOS apps use the .icns from the app bundle.
 function getDevIconPath() {
@@ -51,6 +154,17 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin') {
+    app.setName(APP_DISPLAY_NAME);
+  }
+
+  app.setAboutPanelOptions({
+    applicationName: APP_DISPLAY_NAME,
+    applicationVersion: app.getVersion(),
+    version: app.getVersion(),
+    copyright: 'Unofficial community tool — not affiliated with Belden Inc. or Ruckus.'
+  });
+
   const icon = getDevIconPath();
   if (process.platform === 'darwin' && app.dock && icon) {
     try {
@@ -60,6 +174,7 @@ app.whenReady().then(() => {
     }
   }
 
+  createApplicationMenu();
   createWindow();
 
   app.on('activate', () => {
@@ -87,6 +202,8 @@ app.on('window-all-closed', () => {
 const configPath = path.join(app.getPath('userData'), 'config.json');
 
 // IPC Handlers
+
+ipcMain.handle('get-app-version', async () => app.getVersion());
 
 // Load saved credentials
 ipcMain.handle('load-credentials', async () => {
@@ -193,7 +310,9 @@ ipcMain.handle('get-access-points', async (event, { tenantId, venueId }) => {
         return ['apRadioParams24G', 'apRadioParams50G', 'apRadioParams6G']
           .some((key) => radio[key] && radio[key].actualTxPower > 0);
       }).length;
+      const withAfc = accessPoints.filter((ap) => ap.afcPowerState).length;
       console.log(`Radio TX power from /venues/aps/query: ${withPower} of ${accessPoints.length} APs`);
+      console.log(`AFC power state from /venues/aps/query: ${withAfc} of ${accessPoints.length} APs`);
     } catch (error) {
       console.warn('[TX] Radio status query failed:', error.message);
     }

@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('api', {
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
   // Credential management
   loadCredentials: () => ipcRenderer.invoke('load-credentials'),
   saveCredentials: (credentials) => ipcRenderer.invoke('save-credentials', credentials),

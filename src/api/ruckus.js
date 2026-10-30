@@ -408,7 +408,7 @@ class RuckusAPI {
   async queryApRadioStatuses(venueId) {
     return this.queryAll(
       '/venues/aps/query',
-      ['serialNumber', 'macAddress', 'name', 'model', 'radioStatuses'],
+      ['serialNumber', 'macAddress', 'name', 'model', 'radioStatuses', 'afcStatus'],
       { venueId: [venueId] }
     );
   }
@@ -597,8 +597,18 @@ function bandParamKey(band) {
   return null;
 }
 
-// Copy live radio power and bandwidth from POST /venues/aps/query onto the
-// configuration objects returned by GET /venues/aps.
+// Map RUCKUS One AFC powerState to the map label suffix.
+// API values are LOW_POWER / STANDARD_POWER (UI shows Low / Standard).
+function afcPowerSuffix(powerState) {
+  const val = String(powerState || '').toLowerCase().replace(/[\s_-]+/g, '');
+  if (!val) return null;
+  if (val.includes('standard') || val === 'sp') return 'SP';
+  if (val.includes('low') || val === 'lpi') return 'LPI';
+  return null;
+}
+
+// Copy live radio power, bandwidth, and AFC status from POST /venues/aps/query
+// onto the configuration objects returned by GET /venues/aps.
 function applyRadioStatuses(accessPoints, rows) {
   const bySerial = new Map();
   const byMac = new Map();
@@ -609,9 +619,13 @@ function applyRadioStatuses(accessPoints, rows) {
   }
 
   for (const ap of accessPoints || []) {
-    if (!ap.radio) continue;
     const row = bySerial.get(String(ap.serialNumber || '')) || byMac.get(normMac(ap.mac || ap.macAddress));
-    if (!row || !Array.isArray(row.radioStatuses)) continue;
+    if (!row) continue;
+
+    const afcSuffix = afcPowerSuffix(row.afcStatus && row.afcStatus.powerState);
+    if (afcSuffix) ap.afcPowerState = afcSuffix;
+
+    if (!ap.radio || !Array.isArray(row.radioStatuses)) continue;
     for (const radio of row.radioStatuses) {
       const key = bandParamKey(radio.band);
       if (!key || !ap.radio[key]) continue;

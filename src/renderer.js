@@ -179,6 +179,19 @@ function showScreen(screenName) {
 
 // Initialize Application
 async function init() {
+  // Show package version on the login screen
+  const versionInfo = document.querySelector('.version-info');
+  if (versionInfo && window.api.getAppVersion) {
+    try {
+      const version = await window.api.getAppVersion();
+      if (version) {
+        versionInfo.textContent = `v${version}`;
+      }
+    } catch (error) {
+      console.warn('Could not load app version:', error);
+    }
+  }
+
   // Load saved credentials
   const credentials = await window.api.loadCredentials();
   if (credentials) {
@@ -1214,7 +1227,10 @@ function drawChannelLabels(ap, x, y, apRadius, apColor, labelsOnLeft = false) {
         const ch = radio.apRadioParams6G.operativeChannel;
         const bw = operativeBandwidth(radio.apRadioParams6G);
         const tx = formatTxPower(radio.apRadioParams6G.actualTxPower, radio.apRadioParams6G.operativeTxPower, radio.apRadioParams6G.txPower, ap.model, 'model6G');
-        labels.push({ band: '6G', channel: ch, bandwidth: bw, txPower: tx, color: '#FF5722' });
+        // AFC Power State from /venues/aps/query: Low -> LPI, Standard -> SP
+        const hasTx = tx && tx !== '??';
+        const afcSuffix = (hasTx && ap.afcPowerState) ? ap.afcPowerState : null;
+        labels.push({ band: '6G', channel: ch, bandwidth: bw, txPower: tx, afcSuffix, color: '#FF5722' });
       } else {
         labels.push({ band: '6G', disabled: true, color: '#FF5722' });
       }
@@ -1251,7 +1267,8 @@ function drawChannelLabels(ap, x, y, apRadius, apColor, labelsOnLeft = false) {
       text = `${label.band}: disabled`;
     } else {
       const txPart = label.txPower ? `/${label.txPower}` : '';
-      text = `${label.band}: ${label.channel}/${label.bandwidth}${txPart}`;
+      const afcPart = label.afcSuffix ? ` (${label.afcSuffix})` : '';
+      text = `${label.band}: ${label.channel}/${label.bandwidth}${txPart}${afcPart}`;
     }
     drawMapLabelLine(text, labelX, labelY, label.disabled ? '#999999' : label.color, fontSize, labelsOnLeft);
   });
