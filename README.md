@@ -16,7 +16,7 @@ Installers are on the **[Releases](https://github.com/MibenSmmod/Ruckus1-AP-Mapp
 | macOS (Intel) | [Ruckus One AP Mapper-1.1.4-x64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.1.4/Ruckus.One.AP.Mapper-1.1.4-x64.dmg) |
 | Windows (x64) | [Ruckus One AP Mapper-1.1.4-Setup.exe](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.1.4/Ruckus.One.AP.Mapper-1.1.4-Setup.exe) |
 
-On macOS, the app is unsigned — right-click the app and choose **Open** the first time, or allow it in **System Settings → Privacy & Security**.
+macOS builds are signed and notarized by Apple, so they open normally. The Windows installer is signed by WLAN GEEKS LLC; Windows SmartScreen may still show a prompt for a new release until it builds download reputation.
 
 ## Features
 
