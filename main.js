@@ -1,14 +1,22 @@
-const { app, BrowserWindow, ipcMain, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu, safeStorage, dialog, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const RuckusAPI = require('./src/api/ruckus');
 const { checkForUpdates } = require('./src/updater');
+const { createPdfFromJpeg } = require('./src/exportPdf');
 
 const APP_DISPLAY_NAME = 'Ruckus One AP Mapper';
+const CONFIG_VERSION_ENCRYPTED = 2;
 
 let mainWindow;
 let ruckusClient = null;
 let poeQueryCancelled = false;
+let darkModeEnabled = true; // matches renderer default; synced from renderer on load
+
+function setDarkModeEnabled(dark) {
+  darkModeEnabled = !!dark;
+  nativeTheme.themeSource = darkModeEnabled ? 'dark' : 'light';
+}
 
 function createApplicationMenu() {
   const isMac = process.platform === 'darwin';
@@ -43,6 +51,25 @@ function createApplicationMenu() {
     {
       label: 'File',
       submenu: [
+        {
+          label: 'Export Map as PNG…',
+          accelerator: 'CmdOrCtrl+E',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('export-map-request', 'png');
+            }
+          }
+        },
+        {
+          label: 'Export Map as PDF…',
+          accelerator: 'CmdOrCtrl+Shift+E',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('export-map-request', 'pdf');
+            }
+          }
+        },
+        { type: 'separator' },
         ...(!isMac ? [checkUpdatesItem, { type: 'separator' }] : []),
         isMac ? { role: 'close' } : { role: 'quit' }
       ]
@@ -81,6 +108,18 @@ function createApplicationMenu() {
         { role: 'zoomIn' },
         { role: 'zoomOut' },
         { type: 'separator' },
+        {
+          label: 'Dark Mode',
+          type: 'checkbox',
+          checked: darkModeEnabled,
+          click: (menuItem) => {
+            setDarkModeEnabled(menuItem.checked);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('set-dark-mode', darkModeEnabled);
+            }
+          }
+        },
+        { type: 'separator' },
         { role: 'togglefullscreen' }
       ]
     },
@@ -97,6 +136,15 @@ function createApplicationMenu() {
     {
       role: 'help',
       submenu: [
+        {
+          label: 'Keyboard Shortcuts',
+          accelerator: 'CmdOrCtrl+/',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('show-keyboard-shortcuts');
+            }
+          }
+        },
         {
           label: 'GitHub Releases',
           click: async () => {
@@ -140,6 +188,14 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     mainWindow.focus();
+
+    // FR#14: silent launch check — prompt only if a newer release exists.
+    // Two attempts with timeouts; failures are logged and ignored so startup never hangs.
+    setTimeout(() => {
+      checkForUpdates({ silent: true, retries: 2 }).catch((error) => {
+        console.error('[updater] Startup check failed:', error);
+      });
+    }, 2000);
   });
 
   mainWindow.loadFile('src/index.html');
@@ -174,6 +230,7 @@ app.whenReady().then(() => {
     }
   }
 
+  setDarkModeEnabled(darkModeEnabled);
   createApplicationMenu();
   createWindow();
 
@@ -198,30 +255,155 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Config file path
+// Config file path — credentials are encrypted at rest via Electron safeStorage
+// (macOS Keychain / Windows DPAPI). Never store Tenant ID, Client ID, or Client Secret in plaintext.
 const configPath = path.join(app.getPath('userData'), 'config.json');
+
+function assertSafeStorageAvailable() {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error(
+      'OS credential encryption is unavailable. Credentials cannot be saved securely on this system.'
+    );
+  }
+}
+
+function encryptCredentials(credentials) {
+  assertSafeStorageAvailable();
+  const secretPayload = JSON.stringify({
+    tenantId: credentials.tenantId || '',
+    clientId: credentials.clientId || '',
+    clientSecret: credentials.clientSecret || ''
+  });
+  const encrypted = safeStorage.encryptString(secretPayload);
+  return {
+    version: CONFIG_VERSION_ENCRYPTED,
+    region: credentials.region || 'na',
+    encryptedPayload: encrypted.toString('base64')
+  };
+}
+
+function decryptCredentials(stored) {
+  assertSafeStorageAvailable();
+  if (!stored || typeof stored.encryptedPayload !== 'string') {
+    throw new Error('Encrypted credentials are missing or invalid.');
+  }
+  const decrypted = safeStorage.decryptString(Buffer.from(stored.encryptedPayload, 'base64'));
+  const secrets = JSON.parse(decrypted);
+  return {
+    region: stored.region || 'na',
+    tenantId: secrets.tenantId || '',
+    clientId: secrets.clientId || '',
+    clientSecret: secrets.clientSecret || ''
+  };
+}
+
+function isPlaintextCredentials(stored) {
+  return Boolean(
+    stored
+    && typeof stored === 'object'
+    && stored.version !== CONFIG_VERSION_ENCRYPTED
+    && (stored.tenantId || stored.clientId || stored.clientSecret)
+  );
+}
+
+function writeEncryptedCredentials(credentials) {
+  const encryptedConfig = encryptCredentials(credentials);
+  fs.writeFileSync(configPath, JSON.stringify(encryptedConfig, null, 2));
+}
+
+function loadStoredCredentials() {
+  if (!fs.existsSync(configPath)) {
+    return null;
+  }
+
+  const stored = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+  // Legacy plaintext config: migrate to OS-encrypted storage on first read
+  if (isPlaintextCredentials(stored)) {
+    const credentials = {
+      region: stored.region || 'na',
+      tenantId: stored.tenantId || '',
+      clientId: stored.clientId || '',
+      clientSecret: stored.clientSecret || ''
+    };
+    try {
+      writeEncryptedCredentials(credentials);
+    } catch (migrateError) {
+      console.error('Error migrating plaintext credentials to encrypted storage:', migrateError);
+      // Still return credentials so the user can sign in; next successful save will encrypt.
+    }
+    return credentials;
+  }
+
+  if (stored && stored.version === CONFIG_VERSION_ENCRYPTED) {
+    return decryptCredentials(stored);
+  }
+
+  return null;
+}
 
 // IPC Handlers
 
 ipcMain.handle('get-app-version', async () => app.getVersion());
 
-// Load saved credentials
+// Keep View → Dark Mode checkbox in sync with the in-app settings toggle
+ipcMain.on('theme-changed', (event, dark) => {
+  setDarkModeEnabled(dark);
+  createApplicationMenu();
+});
+
+
+// Save exported map (PNG bytes or JPEG→PDF) via native save dialog
+ipcMain.handle('export-map', async (event, { dataBase64, format, defaultName, width, height }) => {
+  try {
+    const isPdf = format === 'pdf';
+    const result = await dialog.showSaveDialog(mainWindow || undefined, {
+      title: isPdf ? 'Export Map as PDF' : 'Export Map as PNG',
+      defaultPath: defaultName || (isPdf ? 'floor-plan.pdf' : 'floor-plan.png'),
+      filters: isPdf
+        ? [{ name: 'PDF', extensions: ['pdf'] }]
+        : [{ name: 'PNG Image', extensions: ['png'] }]
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { canceled: true };
+    }
+
+    const binary = Buffer.from(dataBase64, 'base64');
+    if (isPdf) {
+      const pdf = createPdfFromJpeg(binary, width, height);
+      fs.writeFileSync(result.filePath, pdf);
+    } else {
+      fs.writeFileSync(result.filePath, binary);
+    }
+
+    return { canceled: false, filePath: result.filePath };
+  } catch (error) {
+    console.error('Error exporting map:', error);
+    return { canceled: false, error: error.message || String(error) };
+  }
+});
+
+ipcMain.handle('show-item-in-folder', async (event, filePath) => {
+  if (filePath) {
+    shell.showItemInFolder(filePath);
+  }
+});
+
+// Load saved credentials (decrypts OS-protected payload; migrates legacy plaintext)
 ipcMain.handle('load-credentials', async () => {
   try {
-    if (fs.existsSync(configPath)) {
-      const data = fs.readFileSync(configPath, 'utf8');
-      return JSON.parse(data);
-    }
+    return loadStoredCredentials();
   } catch (error) {
     console.error('Error loading credentials:', error);
   }
   return null;
 });
 
-// Save credentials
+// Save credentials encrypted with the OS user store (Keychain / DPAPI)
 ipcMain.handle('save-credentials', async (event, credentials) => {
   try {
-    fs.writeFileSync(configPath, JSON.stringify(credentials, null, 2));
+    writeEncryptedCredentials(credentials);
     return true;
   } catch (error) {
     console.error('Error saving credentials:', error);
@@ -301,20 +483,20 @@ ipcMain.handle('get-access-points', async (event, { tenantId, venueId }) => {
     }
     const accessPoints = await ruckusClient.getAccessPoints(tenantId, venueId);
 
-    // Live dBm from the same query the RUCKUS One floor-plan popup uses.
+    // Live dBm / AFC / clientCount from the same query the RUCKUS One UI uses.
     try {
       const radioRows = await ruckusClient.queryApRadioStatuses(venueId);
       RuckusAPI.applyRadioStatuses(accessPoints, radioRows);
-      const withPower = accessPoints.filter((ap) => {
-        const radio = ap.radio || {};
-        return ['apRadioParams24G', 'apRadioParams50G', 'apRadioParams6G']
-          .some((key) => radio[key] && radio[key].actualTxPower > 0);
-      }).length;
-      const withAfc = accessPoints.filter((ap) => ap.afcPowerState).length;
-      console.log(`Radio TX power from /venues/aps/query: ${withPower} of ${accessPoints.length} APs`);
-      console.log(`AFC power state from /venues/aps/query: ${withAfc} of ${accessPoints.length} APs`);
     } catch (error) {
       console.warn('[TX] Radio status query failed:', error.message);
+    }
+
+    // Per-band client density (read-only; soft-fail so floor still loads).
+    try {
+      const clientRows = await ruckusClient.queryApClients(venueId);
+      RuckusAPI.applyClientBandCounts(accessPoints, clientRows);
+    } catch (error) {
+      console.warn('[Clients] AP clients query failed:', error.message);
     }
 
     return { success: true, data: accessPoints };

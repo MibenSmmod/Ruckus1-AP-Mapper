@@ -408,7 +408,18 @@ class RuckusAPI {
   async queryApRadioStatuses(venueId) {
     return this.queryAll(
       '/venues/aps/query',
-      ['serialNumber', 'macAddress', 'name', 'model', 'radioStatuses', 'afcStatus'],
+      ['serialNumber', 'macAddress', 'name', 'model', 'radioStatuses', 'afcStatus', 'clientCount'],
+      { venueId: [venueId] }
+    );
+  }
+
+  // Connected Wi-Fi clients for a venue (minimal fields for per-band density).
+  // AP identity lives under apInformation (serialNumber / macAddress); flat
+  // apMac / apSerialNumber projections are ignored by the API.
+  async queryApClients(venueId) {
+    return this.queryAll(
+      '/venues/aps/clients/query',
+      ['apInformation', 'band'],
       { venueId: [venueId] }
     );
   }
@@ -484,7 +495,7 @@ class RuckusAPI {
       console.warn('[PoE] Switch port query failed:', error.message);
     }
     const portIndex = indexPorts(ports);
-    if (shouldCancel()) return labelsForAps(list, {}, portIndex);
+    if (shouldCancel()) return poeResultsForAps(list, {}, portIndex);
 
     const neighborsBySerial = {};
     if (refresh && operational.length && !shouldCancel()) {
@@ -497,10 +508,11 @@ class RuckusAPI {
           ap.name || ap.serialNumber
         );
         try {
+          // Both status and type are required; {} yields AP-OPS-10200 Invalid attribute value.
           await this.apiCall(
             'PATCH',
             `/venues/${encodeURIComponent(venueId)}/aps/${encodeURIComponent(ap.serialNumber)}/neighbors`,
-            {}
+            { status: 'CURRENT', type: 'LLDP_NEIGHBOR' }
           );
         } catch (error) {
           console.warn(`[PoE] LLDP refresh failed for ${ap.name || ap.serialNumber}:`, error.message);
@@ -516,7 +528,7 @@ class RuckusAPI {
             `${remaining}s remaining`
           );
         });
-        if (!finished) return labelsForAps(list, neighborsBySerial, portIndex);
+        if (!finished) return poeResultsForAps(list, neighborsBySerial, portIndex);
       }
     }
 
@@ -532,17 +544,22 @@ class RuckusAPI {
         const resp = await this.apiCall(
           'POST',
           `/venues/${encodeURIComponent(venueId)}/aps/${encodeURIComponent(ap.serialNumber)}/neighbors/query`,
-          { page: 1, pageSize: 25 }
+          { page: 1, pageSize: 25, filters: [{ type: 'LLDP_NEIGHBOR' }] }
         );
         neighborsBySerial[ap.serialNumber] = neighborList(resp);
       } catch (error) {
-        console.warn(`[PoE] LLDP read failed for ${ap.name || ap.serialNumber}:`, error.message);
-        neighborsBySerial[ap.serialNumber] = [];
+        // WIFI-10498 means the AP has no LLDP neighbor table yet — not a transport failure.
+        if (/WIFI-10498|No detected neighbor data/i.test(error.message)) {
+          neighborsBySerial[ap.serialNumber] = [];
+        } else {
+          console.warn(`[PoE] LLDP read failed for ${ap.name || ap.serialNumber}:`, error.message);
+          neighborsBySerial[ap.serialNumber] = [];
+        }
       }
     }
 
     report(100, 'Complete', '');
-    return labelsForAps(list, neighborsBySerial, portIndex);
+    return poeResultsForAps(list, neighborsBySerial, portIndex);
   }
 }
 
@@ -597,6 +614,15 @@ function bandParamKey(band) {
   return null;
 }
 
+// Display band label for client density (matches map RF band names).
+function bandDisplayLabel(band) {
+  const key = bandParamKey(band);
+  if (key === 'apRadioParams24G') return '2.4G';
+  if (key === 'apRadioParams50G') return '5G';
+  if (key === 'apRadioParams6G') return '6G';
+  return null;
+}
+
 // Map RUCKUS One AFC powerState to the map label suffix.
 // API values are LOW_POWER / STANDARD_POWER (UI shows Low / Standard).
 function afcPowerSuffix(powerState) {
@@ -607,7 +633,7 @@ function afcPowerSuffix(powerState) {
   return null;
 }
 
-// Copy live radio power, bandwidth, and AFC status from POST /venues/aps/query
+// Copy live radio power, bandwidth, AFC status, and clientCount from POST /venues/aps/query
 // onto the configuration objects returned by GET /venues/aps.
 function applyRadioStatuses(accessPoints, rows) {
   const bySerial = new Map();
@@ -625,6 +651,11 @@ function applyRadioStatuses(accessPoints, rows) {
     const afcSuffix = afcPowerSuffix(row.afcStatus && row.afcStatus.powerState);
     if (afcSuffix) ap.afcPowerState = afcSuffix;
 
+    if (row.clientCount != null && row.clientCount !== '') {
+      const clients = Number(row.clientCount);
+      if (Number.isFinite(clients) && clients >= 0) ap.clientCount = clients;
+    }
+
     if (!ap.radio || !Array.isArray(row.radioStatuses)) continue;
     for (const radio of row.radioStatuses) {
       const key = bandParamKey(radio.band);
@@ -640,6 +671,64 @@ function applyRadioStatuses(accessPoints, rows) {
   return accessPoints;
 }
 
+// Aggregate POST /venues/aps/clients/query rows into per-AP per-band counts.
+// Always sets clientCountsByBand (zeros when the AP has no clients) so the popup
+// can show a breakdown whenever this query succeeded.
+function applyClientBandCounts(accessPoints, clientRows) {
+  const countsBySerial = new Map();
+  const countsByMac = new Map();
+
+  function emptyCounts() {
+    return { '2.4G': 0, '5G': 0, '6G': 0 };
+  }
+
+  function bump(map, key, band) {
+    if (!key || !band) return;
+    let counts = map.get(key);
+    if (!counts) {
+      counts = emptyCounts();
+      map.set(key, counts);
+    }
+    counts[band] += 1;
+  }
+
+  for (const row of clientRows || []) {
+    const band = bandDisplayLabel(row.band);
+    if (!band) continue;
+    const apInfo = row.apInformation || {};
+    const serial =
+      row.apSerialNumber != null
+        ? String(row.apSerialNumber)
+        : apInfo.serialNumber != null
+          ? String(apInfo.serialNumber)
+          : '';
+    const mac = normMac(
+      row.apMac ||
+        row.apMacAddress ||
+        apInfo.macAddress ||
+        apInfo.mac ||
+        row.mac
+    );
+    if (serial) bump(countsBySerial, serial, band);
+    if (mac) bump(countsByMac, mac, band);
+  }
+
+  for (const ap of accessPoints || []) {
+    const counts =
+      countsBySerial.get(String(ap.serialNumber || '')) ||
+      countsByMac.get(normMac(ap.mac || ap.macAddress));
+    ap.clientCountsByBand = counts ? { ...counts } : emptyCounts();
+    // Prefer the clients-list sum over /venues/aps/query clientCount so the
+    // popup total always matches the per-band breakdown (those APIs can disagree).
+    const sum =
+      (ap.clientCountsByBand['2.4G'] || 0) +
+      (ap.clientCountsByBand['5G'] || 0) +
+      (ap.clientCountsByBand['6G'] || 0);
+    ap.clientCount = sum;
+  }
+  return accessPoints;
+}
+
 function portIdFromDesc(desc) {
   const match = PORT_ID_RE.exec(desc || '');
   return match ? match[1] : null;
@@ -651,11 +740,25 @@ function toInt(value) {
   return Number.isNaN(n) ? null : n;
 }
 
-function formatWatts(mw) {
+function wattsFromMw(mw) {
   const n = toInt(mw);
   if (n == null) return null;
-  const watts = Math.round((n / 1000) * 10) / 10;
+  return Math.round((n / 1000) * 10) / 10;
+}
+
+function formatWatts(mw) {
+  const watts = wattsFromMw(mw);
+  if (watts == null) return null;
   return Number.isInteger(watts) ? String(watts) : String(watts);
+}
+
+function standardRank(standard) {
+  if (!standard) return 0;
+  const s = String(standard);
+  if (/802\.3\s*bt/i.test(s) || /type\s*[34]/i.test(s)) return 3;
+  if (/802\.3\s*at/i.test(s) || /type\s*2/i.test(s)) return 2;
+  if (/802\.3\s*af/i.test(s) || /type\s*1/i.test(s)) return 1;
+  return 0;
 }
 
 function lldpClass(lldp) {
@@ -738,8 +841,8 @@ function isExplicitlyFalse(value) {
   return value === false || value === 'false' || value === 'False';
 }
 
-// Compact map label. LLDP class/allocation is the negotiated PoE; the switch
-// port type and draw are used when the AP has no power TLV.
+// Compact map label. LLDP class/allocation is negotiated PoE; switch poeUsed
+// is live draw. Prefer both when available: "802.3bt C5 40.3W / Using 14.1W".
 function formatPoeLabel(lldp, port) {
   const cls = lldpClass(lldp);
   let standard = standardFromClass(cls) || standardFromPowerType(lldp && lldp.lldpPowerType);
@@ -749,16 +852,20 @@ function formatPoeLabel(lldp, port) {
 
   const alloc = formatWatts(lldp && lldp.lldpPSEAllocPowerVal);
   const draw = formatWatts(port && port.poeUsed);
-  const shownW = alloc != null ? alloc : draw;
 
   if (!standard && port && port.poeType) standard = String(port.poeType);
-  if (!standard && shownW == null) return null;
+  if (!standard && alloc == null && draw == null) return null;
 
   const parts = [];
   if (standard) parts.push(standard);
   if (cls != null) parts.push(`C${cls}`);
-  if (shownW != null) parts.push(`${shownW}W`);
-  return parts.join(' ');
+  if (alloc != null) parts.push(`${alloc}W`);
+
+  const negotiated = parts.join(' ');
+  if (alloc != null && draw != null) return `${negotiated} / Using ${draw}W`;
+  if (alloc != null) return negotiated;
+  if (draw != null) return negotiated ? `${negotiated} / Using ${draw}W` : `Using ${draw}W`;
+  return negotiated || null;
 }
 
 function labelForAp(ap, neighbors, port) {
@@ -771,23 +878,103 @@ function labelForAp(ap, neighbors, port) {
   return 'error:No PoE data';
 }
 
-function labelsForAps(aps, neighborsBySerial, portIndex) {
-  const out = {};
+// Structured PoE row for rollups (FR#4). Map labels stay in `label`.
+function detailForAp(ap, neighbors, port) {
+  const mac = String(ap.mac || ap.macAddress || '').toLowerCase();
+  const lldp = pickPseNeighbor(neighbors);
+  const label = labelForAp(ap, neighbors, port);
+  const operational = isOperational(ap);
+
+  let status = 'ok';
+  if (typeof label === 'string' && label.startsWith('error:')) {
+    const err = label.slice(6);
+    if (err === 'Offline') status = 'offline';
+    else if (err === 'PoE disabled') status = 'poe_disabled';
+    else if (err === 'No LLDP') status = 'no_lldp';
+    else status = 'no_data';
+  }
+
+  const cls = lldpClass(lldp);
+  let negotiatedStandard = standardFromClass(cls) || standardFromPowerType(lldp && lldp.lldpPowerType);
+  const upoe = lldp && (lldp.lldpUPOE === true || String(lldp.lldpUPOE).toLowerCase() === 'true');
+  if (!negotiatedStandard && upoe) negotiatedStandard = '802.3bt';
+  const portStandard = port ? standardFromPortType(port.poeType) : null;
+  if (!negotiatedStandard && portStandard) negotiatedStandard = portStandard;
+
+  let underpowered = false;
+  if (operational && port && isExplicitlyFalse(port.poeEnabled)) {
+    underpowered = true;
+    status = 'poe_disabled';
+  } else if (
+    status === 'ok' &&
+    negotiatedStandard &&
+    portStandard &&
+    standardRank(negotiatedStandard) > standardRank(portStandard)
+  ) {
+    underpowered = true;
+    status = 'underpowered';
+  }
+
+  const portId = (port && port.portIdentifier) ||
+    (lldp && portIdFromDesc(lldp.lldpPortDesc)) ||
+    null;
+
+  return {
+    apName: ap.name || '',
+    apMac: mac,
+    serial: ap.serialNumber || '',
+    operational,
+    status,
+    underpowered,
+    label,
+    standard: negotiatedStandard || null,
+    class: cls,
+    allocW: wattsFromMw(lldp && lldp.lldpPSEAllocPowerVal),
+    drawW: wattsFromMw(port && port.poeUsed),
+    portId,
+    switchSerial: (port && (port.switchSerial || port.switchUnitId)) ||
+      (lldp && lldp.neighborSerialNumber) ||
+      null,
+    switchName: (port && port.switchName) ||
+      (lldp && (lldp.neighborSystemName || lldp.neighborName)) ||
+      null,
+    portPoeEnabled: port ? !isExplicitlyFalse(port.poeEnabled) : null,
+    portPoeType: (port && port.poeType) || null,
+    portBudgetW: wattsFromMw(port && port.poeTotal)
+  };
+}
+
+function poeResultsForAps(aps, neighborsBySerial, portIndex) {
+  const labels = {};
+  const details = {};
   for (const ap of aps) {
     const mac = String(ap.mac || ap.macAddress || '').toLowerCase();
     if (!mac) continue;
     const neighbors = neighborsBySerial[ap.serialNumber] || [];
     const lldp = pickPseNeighbor(neighbors);
     const port = findPort(ap, lldp, portIndex);
-    out[mac] = labelForAp(ap, neighbors, port);
+    const detail = detailForAp(ap, neighbors, port);
+    labels[mac] = detail.label;
+    details[mac] = detail;
   }
-  return out;
+  return { labels, details };
+}
+
+// Back-compat helper used by older call sites / tests.
+function labelsForAps(aps, neighborsBySerial, portIndex) {
+  return poeResultsForAps(aps, neighborsBySerial, portIndex).labels;
 }
 
 module.exports = RuckusAPI;
 module.exports.applyRadioStatuses = applyRadioStatuses;
+module.exports.applyClientBandCounts = applyClientBandCounts;
 module.exports.formatPoeLabel = formatPoeLabel;
 module.exports.labelForAp = labelForAp;
+module.exports.detailForAp = detailForAp;
+module.exports.poeResultsForAps = poeResultsForAps;
+module.exports.labelsForAps = labelsForAps;
 module.exports.findPort = findPort;
 module.exports.indexPorts = indexPorts;
 module.exports.pickPseNeighbor = pickPseNeighbor;
+module.exports.standardRank = standardRank;
+module.exports.wattsFromMw = wattsFromMw;

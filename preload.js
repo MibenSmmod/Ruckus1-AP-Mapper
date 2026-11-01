@@ -25,5 +25,29 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_event, data) => callback(data);
     ipcRenderer.on('poe-progress', listener);
     return () => ipcRenderer.removeListener('poe-progress', listener);
+  },
+
+  // Map export
+  exportMap: (params) => ipcRenderer.invoke('export-map', params),
+  showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
+  onExportMapRequest: (callback) => {
+    const listener = (_event, format) => callback(format);
+    ipcRenderer.on('export-map-request', listener);
+    return () => ipcRenderer.removeListener('export-map-request', listener);
+  },
+
+  // Theme (View menu ↔ settings toggle)
+  notifyThemeChanged: (dark) => ipcRenderer.send('theme-changed', dark),
+  onSetDarkMode: (callback) => {
+    const listener = (_event, dark) => callback(dark);
+    ipcRenderer.on('set-dark-mode', listener);
+    return () => ipcRenderer.removeListener('set-dark-mode', listener);
+  },
+
+  // Help → Keyboard Shortcuts (FR#11)
+  onShowKeyboardShortcuts: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('show-keyboard-shortcuts', listener);
+    return () => ipcRenderer.removeListener('show-keyboard-shortcuts', listener);
   }
 });

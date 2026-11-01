@@ -45,19 +45,39 @@ function pickAsset(assets, platform, arch) {
   return null;
 }
 
+const FETCH_TIMEOUT_MS = 10000;
+const RETRY_DELAY_MS = 1500;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchLatestRelease() {
-  const response = await fetch(RELEASES_API, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'Ruckus-One-AP-Mapper'
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(RELEASES_API, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'Ruckus-One-AP-Mapper'
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`GitHub returned ${response.status} while checking for updates`);
     }
-  });
 
-  if (!response.ok) {
-    throw new Error(`GitHub returned ${response.status} while checking for updates`);
+    return await response.json();
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      throw new Error('Timed out while checking for updates');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
-
-  return response.json();
 }
 
 function parentWindow() {
@@ -304,17 +324,43 @@ async function promptAndInstall(updateInfo) {
   });
 }
 
-async function checkForUpdates({ silent = false } = {}) {
+/**
+ * Check GitHub for a newer release.
+ * @param {object} [options]
+ * @param {boolean} [options.silent=false] When true, only prompt if an update
+ *   is available (no "up to date" or error dialogs). Used on app launch.
+ * @param {number} [options.retries=1] Max fetch attempts (startup uses 2).
+ */
+async function checkForUpdates({ silent = false, retries = 1 } = {}) {
   if (checking) {
     return;
   }
   checking = true;
   const win = parentWindow();
   const currentVersion = normalizeVersion(app.getVersion());
+  const maxAttempts = Math.max(1, Number(retries) || 1);
+  let lastError = null;
 
   try {
-    console.log('[updater] Checking GitHub releases…');
-    const release = await fetchLatestRelease();
+    let release = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        release = await fetchLatestRelease();
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        console.error(`[updater] Check attempt ${attempt} failed:`, error.message || error);
+        if (attempt < maxAttempts) {
+          await delay(RETRY_DELAY_MS);
+        }
+      }
+    }
+
+    if (!release) {
+      throw lastError || new Error('Could not check for updates');
+    }
+
     const latestVersion = normalizeVersion(release.tag_name || release.name);
     if (!latestVersion) {
       throw new Error('Latest release did not include a version tag');
@@ -345,10 +391,8 @@ async function checkForUpdates({ silent = false } = {}) {
       asset
     };
 
-    if (!silent) {
-      await promptAndInstall(updateInfo);
-    }
-
+    // Prompt whenever an update exists — including silent startup checks.
+    await promptAndInstall(updateInfo);
     return updateInfo;
   } catch (error) {
     console.error('[updater] Check failed:', error);

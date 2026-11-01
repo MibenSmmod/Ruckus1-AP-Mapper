@@ -1,15 +1,17 @@
 {
   "name": "ruckus-one-ap-mapper",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "description": "Desktop application for visualizing Ruckus ONE access point locations on venue floor plans",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "prebuild": "node scripts/prebuild-check-credentials.js",
     "build": "npm run prebuild && electron-builder --mac",
-    "build:dmg": "npm run prebuild && electron-builder --mac dmg",
-    "build:win": "npm run prebuild && electron-builder --win",
-    "build:all": "npm run prebuild && electron-builder --mac --win",
+    "build:mac-arm64": "npm run prebuild && electron-builder --mac dmg --arm64",
+    "build:mac-x64": "npm run prebuild && electron-builder --mac dmg --x64",
+    "build:dmg": "npm run prebuild && electron-builder --mac dmg --arm64 --x64",
+    "build:win": "npm run prebuild && electron-builder --win --x64",
+    "build:all": "npm run prebuild && electron-builder --mac dmg --arm64 --x64 && electron-builder --win --x64",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -20,7 +22,7 @@
     "visualization"
   ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "repository": {
     "type": "git",
@@ -36,7 +38,8 @@
       "category": "public.app-category.utilities",
       "target": [
         "dmg"
-      ]
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "win": {
       "target": [
