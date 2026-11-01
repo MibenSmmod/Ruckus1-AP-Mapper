@@ -1,6 +1,6 @@
 # Ruckus One AP Mapper
 
-Desktop app for viewing Ruckus ONE access points on venue floor plans, with RF details (channel, bandwidth, transmit power) and optional PoE information.  Adds AFC power state if 6GHz is enabled.  This gives you a holistic view of all devices on a floor plan with RF info at a glance.
+Desktop app for viewing RUCKUS One access points on venue floor plans, with RF details (channel, bandwidth, transmit power) and optional PoE information.  Adds AFC power state if 6GHz is enabled.  This gives you a holistic view of all devices on a floor plan with RF info at a glance.
 
 ## Disclaimer
 
