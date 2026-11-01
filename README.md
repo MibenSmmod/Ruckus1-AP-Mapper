@@ -36,7 +36,7 @@ macOS builds are signed and notarized by Apple, so they open normally. The Windo
 
 ### Login
 
-![Login screen](screenshots/01-login.png)
+![Login screen](screenshots/01-login-v1.2.0.png)
 
 ### Select venue
 
