@@ -2,6 +2,8 @@
 
 Desktop app for viewing RUCKUS One access points on venue floor plans, with RF details (channel, bandwidth, transmit power) and optional PoE information.  Adds AFC power state if 6GHz is enabled.  This gives you a holistic view of all devices on a floor plan with RF info at a glance.
 
+Map images, floor-plan scale, and device locations are obtained through the RUCKUS One (R1) APIs.
+
 ## Disclaimer
 
 This is an unofficial, community-developed tool. It is **not** affiliated with, endorsed by, or officially supported by Belden Inc., Ruckus (a Belden Brand), or any of their affiliates. Use of Ruckus / Belden trademarks is for identification only.
