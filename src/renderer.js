@@ -5084,13 +5084,18 @@ async function ensureGlobalSearchIndex({ forceRefresh = false } = {}) {
     ? window.api.onGlobalSearchProgress((info) => updateGlobalSearchProgress(info))
     : () => {};
 
+  const tenantId = state.tenantId;
   try {
     const venues = (state.venues || []).map((v) => ({ id: v.id, name: v.name || v.id }));
     const result = await window.api.buildGlobalSearchIndex({
-      tenantId: state.tenantId,
+      tenantId,
       venues
     });
 
+    // Logged out (or switched tenant) while building: drop the result.
+    if (state.tenantId !== tenantId) {
+      return { success: false, cancelled: true };
+    }
     if (result.cancelled) {
       setGlobalSearchStatus('Index build cancelled.');
       return { success: false, cancelled: true };

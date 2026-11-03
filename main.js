@@ -671,6 +671,9 @@ ipcMain.handle('build-global-search-index', async (event, { tenantId, venues }) 
     if (!ruckusClient) {
       throw new Error('Not authenticated');
     }
+    // Keep this run's client: logout sets ruckusClient to null while
+    // requests may still be in flight.
+    const client = ruckusClient;
     run = { cancelled: false };
     activeGlobalSearchRuns.add(run);
     const venueList = Array.isArray(venues) ? venues : [];
@@ -692,7 +695,7 @@ ipcMain.handle('build-global-search-index', async (event, { tenantId, venues }) 
     };
 
     report('aps', 'Fetching access points...');
-    const accessPoints = await ruckusClient.getAllAccessPoints(tenantId);
+    const accessPoints = await client.getAllAccessPoints(tenantId);
     throwIfCancelled();
     done += 1;
     report('aps', `Loaded ${accessPoints.length} access points`);
@@ -700,7 +703,7 @@ ipcMain.handle('build-global-search-index', async (event, { tenantId, venues }) 
     let switches = [];
     report('switches', 'Fetching switches...');
     try {
-      switches = await ruckusClient.getAllSwitches();
+      switches = await client.getAllSwitches();
       throwIfCancelled();
       done += 1;
       report('switches', `Loaded ${switches.length} switches`);
@@ -718,7 +721,7 @@ ipcMain.handle('build-global-search-index', async (event, { tenantId, venues }) 
         await mapWithConcurrency(venueList, GLOBAL_SEARCH_SWITCH_CONCURRENCY, async (venue) => {
           throwIfCancelled();
           try {
-            const rows = await ruckusClient.getSwitches(venue.id);
+            const rows = await client.getSwitches(venue.id);
             switches.push(...(rows || []));
           } catch (venueError) {
             console.warn(`[GlobalSearch] Switches for venue ${venue.id} failed:`, venueError.message);
@@ -738,7 +741,7 @@ ipcMain.handle('build-global-search-index', async (event, { tenantId, venues }) 
       await mapWithConcurrency(venueList, GLOBAL_SEARCH_FLOOR_CONCURRENCY, async (venue) => {
         throwIfCancelled();
         try {
-          const floorPlans = await ruckusClient.getVenueFloorPlans(tenantId, venue.id);
+          const floorPlans = await client.getVenueFloorPlans(tenantId, venue.id);
           const list = Array.isArray(floorPlans) ? floorPlans : [];
           for (const fp of list) {
             if (!fp || !fp.id) continue;
