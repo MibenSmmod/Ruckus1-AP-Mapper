@@ -53,6 +53,11 @@ const state = {
   searchResults: [], // { type: 'ap'|'switch', device }
   selectedSearchDevice: null, // { type: 'ap'|'switch', device }
   searchKeyboardIndex: -1, // keyboard highlight in search dropdown (FR#11)
+  // FR#17 Global Search
+  globalSearchIndex: null, // { accessPoints, switches, floorsById, fetchedAt }
+  globalSearchHits: [], // matched hits for modal list
+  globalSearchBuilding: false,
+  pendingSearchFocus: null, // { type, key, queryText } after Jump from global search
   showHostname: true,
   showPoE: true, // Display Power Levels (switch budget + cached AP PoE); default on each launch
   showLldp: true, // Display LLDP uplink (switch · port) under PoE; default on each launch
@@ -77,7 +82,14 @@ const state = {
   poeFetchedAt: null, // epoch ms for active floor PoE cache (null = not queried)
   selectedPopupAP: null, // AP object shown in the popup
   hoveredDevice: null, // { type: 'ap'|'switch', key: string } — drawn on top
-  drawPixelRatio: 1 // >1 while rendering a high-res export canvas
+  drawPixelRatio: 1, // >1 while rendering a high-res export canvas
+  // FR#18 Edit / move device locations
+  editMode: false,
+  editBannerDismissed: false, // hide tip for this edit session only
+  unplacedPanelDismissed: false, // hide unplaced panel for this edit session only
+  unplacedSearchQuery: '',
+  canWritePositions: null, // null = unprobed, true/false after probe
+  deviceDrag: null // active drag incl. source 'map'|'unplaced'
 };
 
 // Freshness thresholds for the map summary strip (FR#5 / FR#13)
@@ -124,6 +136,21 @@ const elements = {
   venuePageInfo: document.getElementById('venue-page-info'),
   venueError: document.getElementById('venue-error'),
   logoutBtn: document.getElementById('logout-btn'),
+  globalSearchBtn: document.getElementById('global-search-btn'),
+
+  // Global Search Modal (FR#17)
+  globalSearchModal: document.getElementById('global-search-modal'),
+  globalSearchClose: document.getElementById('global-search-close'),
+  globalSearchForm: document.getElementById('global-search-form'),
+  globalSearchInput: document.getElementById('global-search-input'),
+  globalSearchSubmit: document.getElementById('global-search-submit'),
+  globalSearchRefresh: document.getElementById('global-search-refresh'),
+  globalSearchProgress: document.getElementById('global-search-progress'),
+  globalSearchProgressFill: document.getElementById('global-search-progress-fill'),
+  globalSearchProgressText: document.getElementById('global-search-progress-text'),
+  globalSearchStatus: document.getElementById('global-search-status'),
+  globalSearchResults: document.getElementById('global-search-results'),
+  globalSearchCancel: document.getElementById('global-search-cancel'),
 
   // Floor Plan Selection
   backToVenues: document.getElementById('back-to-venues'),
@@ -141,6 +168,15 @@ const elements = {
   floorSwitcherBtn: document.getElementById('floor-switcher-btn'),
   floorSwitcherMenu: document.getElementById('floor-switcher-menu'),
   refreshBtn: document.getElementById('refresh-btn'),
+  editModeBtn: document.getElementById('edit-mode-btn'),
+  editUnplacedBadge: document.getElementById('edit-unplaced-badge'),
+  editModeBanner: document.getElementById('edit-mode-banner'),
+  editModeBannerDismiss: document.getElementById('edit-mode-banner-dismiss'),
+  unplacedDevicesPanel: document.getElementById('unplaced-devices-panel'),
+  unplacedDevicesTitle: document.getElementById('unplaced-devices-title'),
+  unplacedDevicesDismiss: document.getElementById('unplaced-devices-dismiss'),
+  unplacedDevicesSearch: document.getElementById('unplaced-devices-search'),
+  unplacedDevicesList: document.getElementById('unplaced-devices-list'),
   mapLoading: document.getElementById('map-loading'),
   canvas: document.getElementById('floor-plan-canvas'),
   logoutBtn3: document.getElementById('logout-btn-3'),
@@ -159,6 +195,14 @@ const elements = {
   mapOpacitySlider: document.getElementById('map-opacity-slider'),
   mapOpacityLabel: document.getElementById('map-opacity-label'),
   mapOpacityInput: document.getElementById('map-opacity-input'),
+
+  // Getting Started (FR#20)
+  gettingStartedBtn: document.getElementById('getting-started-btn'),
+  gettingStartedModal: document.getElementById('getting-started-modal'),
+  gettingStartedChecklist: document.getElementById('getting-started-checklist'),
+  closeGettingStartedBtn: document.getElementById('close-getting-started-btn'),
+  gettingStartedDoneBtn: document.getElementById('getting-started-done-btn'),
+  gettingStartedResetBtn: document.getElementById('getting-started-reset-btn'),
 
   // Search
   apSearchToggle: document.getElementById('ap-search-toggle'),
@@ -223,6 +267,7 @@ const elements = {
   sshModal: document.getElementById('ssh-confirmation-modal'),
   sshConfirmBtn: document.getElementById('ssh-confirm-btn'),
   sshCancelBtn: document.getElementById('ssh-cancel-btn'),
+  sshCloseBtn: document.getElementById('ssh-close-btn'),
 
   // PoE Progress Modal
   poeProgressModal: document.getElementById('poe-progress-modal'),
@@ -288,6 +333,7 @@ const VENUE_FAVORITES_KEY = 'r1-mapper-venue-favorites';
 const VENUE_PAGE_SIZE_KEY = 'r1-mapper-venue-page-size';
 const VENUE_VIEW_MODE_KEY = 'r1-mapper-venue-view-mode';
 const MAP_OPACITY_KEY = 'r1-mapper-map-opacity';
+const GETTING_STARTED_KEY = 'r1-mapper-getting-started';
 const DEFAULT_MAP_OPACITY = 75;
 const VENUE_PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 'all'];
 
@@ -313,6 +359,52 @@ function writeLocalStorage(key, value) {
   } catch (_) {
     // Ignore storage errors
   }
+}
+
+function loadGettingStartedProgress() {
+  try {
+    const raw = readLocalStorage(GETTING_STARTED_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveGettingStartedProgress(progress) {
+  writeLocalStorage(GETTING_STARTED_KEY, JSON.stringify(progress || {}));
+}
+
+function getGettingStartedCheckboxes() {
+  if (!elements.gettingStartedChecklist) return [];
+  return Array.from(elements.gettingStartedChecklist.querySelectorAll('input[type="checkbox"][data-gs-id]'));
+}
+
+function applyGettingStartedProgress(progress) {
+  const checked = progress || {};
+  getGettingStartedCheckboxes().forEach((input) => {
+    const id = input.getAttribute('data-gs-id');
+    input.checked = !!(id && checked[id]);
+  });
+}
+
+function collectGettingStartedProgress() {
+  const progress = {};
+  getGettingStartedCheckboxes().forEach((input) => {
+    const id = input.getAttribute('data-gs-id');
+    if (id && input.checked) progress[id] = true;
+  });
+  return progress;
+}
+
+function persistGettingStartedProgressFromUi() {
+  saveGettingStartedProgress(collectGettingStartedProgress());
+}
+
+function resetGettingStartedProgress() {
+  saveGettingStartedProgress({});
+  applyGettingStartedProgress({});
 }
 
 function loadVenueBrowserPrefs() {
@@ -618,6 +710,7 @@ function showScreen(screenName) {
     updateMapSummaryStrip();
   } else {
     stopSummaryAgeTimer();
+    if (state.editMode || state.deviceDrag) setEditMode(false);
   }
 }
 
@@ -627,6 +720,7 @@ async function init() {
   applyTheme(getStoredTheme() !== 'light');
   loadVenueBrowserPrefs();
   loadLegendCollapsedPref();
+  applyGettingStartedProgress(loadGettingStartedProgress());
 
   // Show package version on the login screen
   const versionInfo = document.querySelector('.version-info');
@@ -680,6 +774,35 @@ function setupEventListeners() {
   elements.logoutBtn.addEventListener('click', handleLogout);
   elements.logoutBtn2.addEventListener('click', handleLogout);
   elements.logoutBtn3.addEventListener('click', handleLogout);
+
+  // Global Search (FR#17)
+  if (elements.globalSearchBtn) {
+    elements.globalSearchBtn.addEventListener('click', openGlobalSearchModal);
+  }
+  if (elements.globalSearchClose) {
+    elements.globalSearchClose.addEventListener('click', () => closeGlobalSearchModal());
+  }
+  if (elements.globalSearchCancel) {
+    elements.globalSearchCancel.addEventListener('click', () => closeGlobalSearchModal({ cancelIndex: true }));
+  }
+  if (elements.globalSearchModal) {
+    elements.globalSearchModal.addEventListener('click', (e) => {
+      if (e.target === elements.globalSearchModal) {
+        closeGlobalSearchModal({ cancelIndex: true });
+      }
+    });
+  }
+  if (elements.globalSearchForm) {
+    elements.globalSearchForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      runGlobalSearch({ forceRefresh: false });
+    });
+  }
+  if (elements.globalSearchRefresh) {
+    elements.globalSearchRefresh.addEventListener('click', () => {
+      runGlobalSearch({ forceRefresh: true });
+    });
+  }
 
   // Venue browser (FR#10)
   elements.venueViewTiles.addEventListener('click', () => setVenueViewMode('tiles'));
@@ -766,6 +889,38 @@ function setupEventListeners() {
   elements.canvas.addEventListener('mouseup', handleCanvasMouseUp);
   elements.canvas.addEventListener('mouseleave', handleCanvasMouseLeave);
 
+  // FR#18 Edit mode
+  if (elements.editModeBtn) {
+    elements.editModeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleEditMode();
+    });
+  }
+  if (elements.editModeBannerDismiss) {
+    elements.editModeBannerDismiss.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.editBannerDismissed = true;
+      syncEditModeUi();
+    });
+  }
+  if (elements.unplacedDevicesDismiss) {
+    elements.unplacedDevicesDismiss.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.unplacedPanelDismissed = true;
+      syncEditModeUi();
+    });
+  }
+  if (elements.unplacedDevicesSearch) {
+    elements.unplacedDevicesSearch.addEventListener('input', (e) => {
+      state.unplacedSearchQuery = e.target.value || '';
+      renderUnplacedDevicesPanel();
+    });
+    elements.unplacedDevicesSearch.addEventListener('mousedown', (e) => e.stopPropagation());
+  }
+  if (elements.unplacedDevicesList) {
+    elements.unplacedDevicesList.addEventListener('mousedown', handleUnplacedListMouseDown);
+  }
+
   // Zoom controls
   elements.zoomInBtn.addEventListener('click', handleZoomIn);
   elements.zoomOutBtn.addEventListener('click', handleZoomOut);
@@ -840,6 +995,44 @@ function setupEventListeners() {
   });
 
   document.addEventListener('keydown', handleGlobalKeydown);
+
+  if (elements.gettingStartedBtn) {
+    elements.gettingStartedBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAPSearchPopup();
+      closeMapFilterPopup();
+      closeSettingsMenu();
+      closeExportMenu();
+      closeFloorSwitcher();
+      showGettingStartedModal();
+    });
+  }
+  if (elements.closeGettingStartedBtn) {
+    elements.closeGettingStartedBtn.addEventListener('click', closeGettingStartedModal);
+  }
+  if (elements.gettingStartedDoneBtn) {
+    elements.gettingStartedDoneBtn.addEventListener('click', closeGettingStartedModal);
+  }
+  if (elements.gettingStartedResetBtn) {
+    elements.gettingStartedResetBtn.addEventListener('click', resetGettingStartedProgress);
+  }
+  if (elements.gettingStartedChecklist) {
+    elements.gettingStartedChecklist.addEventListener('change', (e) => {
+      if (e.target && e.target.matches('input[type="checkbox"][data-gs-id]')) {
+        persistGettingStartedProgressFromUi();
+      }
+    });
+  }
+  if (elements.gettingStartedModal) {
+    elements.gettingStartedModal.addEventListener('click', (e) => {
+      if (e.target === elements.gettingStartedModal) closeGettingStartedModal();
+    });
+  }
+  if (window.api.onShowGettingStarted) {
+    window.api.onShowGettingStarted(() => {
+      showGettingStartedModal();
+    });
+  }
 
   if (elements.closeShortcutsBtn) {
     elements.closeShortcutsBtn.addEventListener('click', closeShortcutsModal);
@@ -996,9 +1189,20 @@ function setupEventListeners() {
   });
 
   elements.sshCancelBtn.addEventListener('click', () => {
-    window.sshConfirmationResult = false;
-    elements.sshModal.classList.add('hidden');
+    dismissSshConfirmation();
   });
+
+  if (elements.sshCloseBtn) {
+    elements.sshCloseBtn.addEventListener('click', dismissSshConfirmation);
+  }
+
+  if (elements.sshModal) {
+    elements.sshModal.addEventListener('click', (e) => {
+      if (e.target === elements.sshModal) {
+        dismissSshConfirmation();
+      }
+    });
+  }
 
   // PoE Progress Modal listeners
   elements.poeCancelBtn.addEventListener('click', () => {
@@ -1084,6 +1288,18 @@ function isOverlayVisible(el) {
   return !!(el && !el.classList.contains('hidden'));
 }
 
+function showGettingStartedModal() {
+  if (!elements.gettingStartedModal) return;
+  applyGettingStartedProgress(loadGettingStartedProgress());
+  elements.gettingStartedModal.classList.remove('hidden');
+}
+
+function closeGettingStartedModal() {
+  if (elements.gettingStartedModal) {
+    elements.gettingStartedModal.classList.add('hidden');
+  }
+}
+
 function showShortcutsModal() {
   if (!elements.shortcutsModal) return;
   elements.shortcutsModal.classList.remove('hidden');
@@ -1120,9 +1336,24 @@ function dismissPoeCacheChoice() {
 
 // Escape closes one topmost overlay per press (FR#11)
 function handleEscapeKey(e) {
+  if (state.deviceDrag) {
+    e.preventDefault();
+    cancelDeviceDrag();
+    return;
+  }
   if (isOverlayVisible(elements.exampleModal)) {
     e.preventDefault();
     closeExampleModal();
+    return;
+  }
+  if (isOverlayVisible(elements.globalSearchModal)) {
+    e.preventDefault();
+    closeGlobalSearchModal({ cancelIndex: true });
+    return;
+  }
+  if (isOverlayVisible(elements.gettingStartedModal)) {
+    e.preventDefault();
+    closeGettingStartedModal();
     return;
   }
   if (isOverlayVisible(elements.shortcutsModal)) {
@@ -1362,7 +1593,11 @@ async function handleLogout() {
   state.venueFloorImageProbeId += 1;
   state.floorPlanThumbnails = {};
   state.floorPlanThumbLoadId += 1;
+  clearGlobalSearchState();
+  closeGlobalSearchModal({ cancelIndex: true });
   closeFloorSwitcher();
+  setEditMode(false);
+  state.canWritePositions = null;
   updateVenueDeviceTotals();
   if (elements.venueToolbar) elements.venueToolbar.classList.add('hidden');
   if (elements.venuePagination) elements.venuePagination.classList.add('hidden');
@@ -1925,6 +2160,7 @@ async function switchToFloorPlan(floorPlan) {
 function clearVenueDevices() {
   state.venueDevices = { accessPoints: [], switches: [], fetchedAt: null };
   state.venueDeviceCounts = { accessPoints: 0, switches: 0 };
+  updateUnplacedEditBadge();
 }
 
 function formatVenueDeviceTotals(counts) {
@@ -1983,6 +2219,7 @@ async function ensureVenueDevices({ force = false } = {}) {
     switches: switches.length
   };
   updateVenueDeviceTotals();
+  updateUnplacedEditBadge();
   return { success: apResult.success };
 }
 
@@ -2107,6 +2344,7 @@ async function loadFloorPlanData({ forceDevices = false } = {}) {
 
     updateDeviceCount();
     updateVenueDeviceTotals();
+    applyPendingSearchFocus();
 
     // Load image
     const img = new Image();
@@ -2612,6 +2850,7 @@ function renderFloorPlan() {
     drawSwitches();
   }
   drawHoveredDeviceOnTop();
+  drawDeviceDragCrosshairs();
 
   // Continue animation if there's a selected search device
   if (state.selectedSearchDevice) {
@@ -2792,12 +3031,25 @@ function getMapDrawScale() {
   };
 }
 
-// Draw Access Points (skip hovered — redrawn on top later)
+function isDraggedAccessPoint(ap) {
+  return state.deviceDrag &&
+    state.deviceDrag.type === 'ap' &&
+    state.deviceDrag.key === accessPointKey(ap);
+}
+
+function isDraggedSwitch(sw) {
+  return state.deviceDrag &&
+    state.deviceDrag.type === 'switch' &&
+    state.deviceDrag.key === switchKey(sw);
+}
+
+// Draw Access Points (skip hovered — redrawn on top later; skip device being dragged)
 function drawAccessPoints() {
   const scale = getMapDrawScale();
   if (!scale) return;
 
   getVisibleAccessPoints().forEach((ap) => {
+    if (isDraggedAccessPoint(ap)) return;
     if (isHoveredAccessPoint(ap)) return;
     drawOneAccessPoint(ap, scale.scaledWidth, scale.scaledHeight);
   });
@@ -2863,27 +3115,43 @@ function drawOneAccessPoint(ap, scaledWidth, scaledHeight) {
   ctx.restore();
 }
 
-// Base screen-px distance for nearby device label conflicts (at zoom 1).
+// Base screen-px distance for nearby device label conflicts (at zoom 1, small font).
 const DEVICE_LABEL_OVERLAP_PX = 24;
-// Extra horizontal reach covering typical right-side AP RF/PoE label width.
+// Extra horizontal reach covering typical right-side AP RF/PoE label width (small font).
 const DEVICE_LABEL_REACH_X_PX = 150;
-// Vertical half-height of a tall AP label stack.
+// Fallback vertical half-height when few label layers are enabled (small font).
 const DEVICE_LABEL_REACH_Y_PX = 55;
+
+function deviceLabelFontMul() {
+  return Math.max(1, state.fontSizeMultiplier || 1);
+}
 
 function deviceLabelOverlapPx() {
   const pr = state.drawPixelRatio || 1;
-  // Marker spacing grows with zoom; keep conflicts tied to floor proximity.
-  return DEVICE_LABEL_OVERLAP_PX * pr * Math.max(1, state.zoom || 1);
+  // Marker spacing grows with zoom; larger fonts need a wider conflict radius.
+  return DEVICE_LABEL_OVERLAP_PX * pr * Math.max(1, state.zoom || 1) * deviceLabelFontMul();
 }
 
 function deviceLabelReachXPx() {
   const pr = state.drawPixelRatio || 1;
-  return DEVICE_LABEL_REACH_X_PX * pr;
+  // Label text width scales roughly with font size.
+  return DEVICE_LABEL_REACH_X_PX * pr * deviceLabelFontMul();
 }
 
+// Approximate half-height of the tallest on-map label stack for current settings.
+// Used so AP↔switch pairs still conflict when markers are farther apart than the
+// old fixed 55px band (regression with large font + PoE/LLDP lines).
 function deviceLabelReachYPx() {
   const pr = state.drawPixelRatio || 1;
-  return DEVICE_LABEL_REACH_Y_PX * pr;
+  const fontMul = deviceLabelFontMul();
+  const lineHeight = 14 * fontMul * pr;
+  let lines = 0;
+  if (state.showHostname) lines += 1;
+  if (state.showBandInfo) lines += 3; // 2.4 / 5 / 6
+  if (state.showLldp) lines += 1;
+  if (state.showPoE) lines += 2; // negotiated + Using
+  const stackHalf = lines > 0 ? (lines * lineHeight) / 2 + lineHeight : 0;
+  return Math.max(DEVICE_LABEL_REACH_Y_PX * pr * fontMul, stackHalf);
 }
 
 function devicesLabelConflict(ax, ay, bx, by) {
@@ -2893,12 +3161,10 @@ function devicesLabelConflict(ax, ay, bx, by) {
   if (dist <= deviceLabelOverlapPx()) return true;
 
   // Labels stay fixed screen size while markers separate as you zoom in.
-  // Treat a peer sitting in the other's default right-side label band as a conflict.
+  // Conflict when a peer sits inside this device's label footprint (right by
+  // default): same column (dx≈0) or within horizontal label reach.
   if (Math.abs(dy) > deviceLabelReachYPx()) return false;
-  const reachX = deviceLabelReachXPx();
-  if (dx > 0 && dx <= reachX) return true;
-  if (dx < 0 && -dx <= reachX) return true;
-  return false;
+  return Math.abs(dx) <= deviceLabelReachXPx();
 }
 
 function collectDeviceLabelPeers(scaledWidth, scaledHeight, { excludeApKey = null, excludeSwitchKey = null } = {}) {
@@ -2965,6 +3231,7 @@ function drawSwitches() {
   if (!scale) return;
 
   getVisibleSwitches().forEach((sw) => {
+    if (isDraggedSwitch(sw)) return;
     if (isHoveredSwitch(sw)) return;
     drawOneSwitch(sw, scale.scaledWidth, scale.scaledHeight);
   });
@@ -3007,6 +3274,7 @@ function drawOneSwitch(sw, scaledWidth, scaledHeight) {
 
 function drawHoveredDeviceOnTop() {
   if (!state.hoveredDevice) return;
+  if (state.deviceDrag && state.hoveredDevice.key === state.deviceDrag.key) return;
   const scale = getMapDrawScale();
   if (!scale) return;
 
@@ -3020,6 +3288,38 @@ function drawHoveredDeviceOnTop() {
     const sw = getVisibleSwitches().find((s) => switchKey(s) === state.hoveredDevice.key);
     if (sw) drawOneSwitch(sw, scale.scaledWidth, scale.scaledHeight);
   }
+}
+
+function drawDeviceDragCrosshairs() {
+  const drag = state.deviceDrag;
+  if (!drag || drag.overCanvas === false) return;
+  const pr = state.drawPixelRatio || 1;
+  const x = drag.currentX;
+  const y = drag.currentY;
+  const arm = 14 * pr;
+  const gap = 4 * pr;
+
+  ctx.save();
+  ctx.strokeStyle = '#0d6efd';
+  ctx.lineWidth = 2 * pr;
+  ctx.lineCap = 'round';
+
+  ctx.beginPath();
+  ctx.moveTo(x - arm, y);
+  ctx.lineTo(x - gap, y);
+  ctx.moveTo(x + gap, y);
+  ctx.lineTo(x + arm, y);
+  ctx.moveTo(x, y - arm);
+  ctx.lineTo(x, y - gap);
+  ctx.moveTo(x, y + gap);
+  ctx.lineTo(x, y + arm);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(x, y, 2.5 * pr, 0, Math.PI * 2);
+  ctx.fillStyle = '#0d6efd';
+  ctx.fill();
+  ctx.restore();
 }
 
 // API reports PoE in mW; RUCKUS One UI shows watts (e.g. 44W/240W 18%).
@@ -3282,13 +3582,22 @@ function drawChannelLabels(ap, x, y, apRadius, apColor, labelsOnLeft = false, hi
     drawMapLabelLine(line.text, labelX, uplinkY, uplinkColor, fontSize, labelsOnLeft);
   });
 
+  // PoE multi-line block stays left-aligned (Using indented under the value).
+  // When AP labels flip left, other lines use textAlign=right; keep PoE as a
+  // left-aligned block anchored so the first line's right edge stays at labelX.
   const poeIndent = ctx.measureText('PoE: ').width;
+  const poeBlockLeft = labelsOnLeft && poeLines.length > 0
+    ? labelX - ctx.measureText(poeLines[0].text).width
+    : labelX;
+  if (labelsOnLeft && poeLines.length > 0) {
+    ctx.textAlign = 'left';
+  }
   poeLines.forEach((line, index) => {
     const poeY = startY + ((labels.length + uplinkLines.length + index) * lineHeight);
-    const lineX = line.indent ? labelX + poeIndent : labelX;
+    const lineX = line.indent ? poeBlockLeft + poeIndent : poeBlockLeft;
     // Mute PoE with non-matching band labels during co-channel highlight
     const poeColor = emphasizeBands ? CO_CHANNEL_MUTED_LABEL : line.color;
-    drawMapLabelLine(line.text, lineX, poeY, poeColor, fontSize, labelsOnLeft);
+    drawMapLabelLine(line.text, lineX, poeY, poeColor, fontSize, false);
   });
 
   ctx.restore();
@@ -3425,8 +3734,10 @@ function setHoveredDevice(next) {
   return true;
 }
 
-// Handle Canvas Mouse Move (cursor change + panning + hover bring-to-front)
+// Handle Canvas Mouse Move (cursor change + panning + hover; device drag uses document listeners)
 function handleCanvasMouseMove(e) {
+  if (state.deviceDrag) return;
+
   const rect = elements.canvas.getBoundingClientRect();
   const mouseX = e.clientX - rect.left;
   const mouseY = e.clientY - rect.top;
@@ -3441,7 +3752,11 @@ function handleCanvasMouseMove(e) {
   }
 
   const hit = getDeviceAtPoint(mouseX, mouseY);
-  elements.canvas.style.cursor = hit ? 'pointer' : (state.zoom > 1 ? 'grab' : 'default');
+  if (state.editMode && hit) {
+    elements.canvas.style.cursor = 'grab';
+  } else {
+    elements.canvas.style.cursor = hit ? 'pointer' : (state.zoom > 1 ? 'grab' : 'default');
+  }
   if (setHoveredDevice(hit)) {
     renderFloorPlan();
   }
@@ -3449,9 +3764,13 @@ function handleCanvasMouseMove(e) {
 
 // Handle Canvas Click
 function handleCanvasClick(e) {
-  // Don't trigger click if we just finished panning
+  // Don't trigger click if we just finished panning or dragging
   if (state.didPan) {
     state.didPan = false;
+    return;
+  }
+  if (state.didDeviceDrag) {
+    state.didDeviceDrag = false;
     return;
   }
 
@@ -3469,14 +3788,20 @@ function handleCanvasClick(e) {
   }
 }
 
-// Handle Canvas Mouse Down (start panning)
+// Handle Canvas Mouse Down (start device drag in edit mode, else panning)
 function handleCanvasMouseDown(e) {
   const rect = elements.canvas.getBoundingClientRect();
   const mouseX = e.clientX - rect.left;
   const mouseY = e.clientY - rect.top;
 
+  const hit = getDeviceAtPoint(mouseX, mouseY);
+  if (state.editMode && hit && state.canWritePositions) {
+    beginDeviceDrag(hit, mouseX, mouseY, e.clientX, e.clientY);
+    return;
+  }
+
   // Don't start panning if clicking on an AP or switch
-  if (getDeviceAtPoint(mouseX, mouseY)) return;
+  if (hit) return;
 
   state.isPanning = true;
   state.didPan = false;
@@ -3485,8 +3810,9 @@ function handleCanvasMouseDown(e) {
   elements.canvas.style.cursor = 'grabbing';
 }
 
-// Handle Canvas Mouse Up (stop panning)
+// Handle Canvas Mouse Up (panning only; device drag finishes via document listener)
 function handleCanvasMouseUp() {
+  if (state.deviceDrag) return;
   if (state.isPanning) {
     state.isPanning = false;
     // If we moved while panning, suppress the click
@@ -3495,14 +3821,585 @@ function handleCanvasMouseUp() {
   }
 }
 
-// Handle Canvas Mouse Leave (stop panning / clear hover)
+// Handle Canvas Mouse Leave (stop panning / clear hover; keep device drag alive for document drop)
 function handleCanvasMouseLeave() {
+  if (state.deviceDrag) {
+    state.deviceDrag.overCanvas = false;
+    renderFloorPlan();
+    return;
+  }
   if (state.isPanning) {
     state.isPanning = false;
     state.didPan = false;
   }
   if (setHoveredDevice(null)) {
     renderFloorPlan();
+  }
+}
+
+// --- FR#18 Edit / move device locations ---
+
+const ADMIN_SCOPE_MESSAGE =
+  'Moving devices requires API credentials with Administrator Scope (write access to RUCKUS One). ' +
+  'Create a new Application Token with Administrator Scope, or continue viewing with Read Only.';
+
+let deviceDragListenersAttached = false;
+
+function clientPointToCanvas(clientX, clientY) {
+  if (!elements.canvas) return null;
+  const rect = elements.canvas.getBoundingClientRect();
+  return {
+    x: clientX - rect.left,
+    y: clientY - rect.top,
+    overCanvas:
+      clientX >= rect.left &&
+      clientX <= rect.right &&
+      clientY >= rect.top &&
+      clientY <= rect.bottom
+  };
+}
+
+function handleDocumentDeviceDragMove(e) {
+  if (!state.deviceDrag) return;
+  const pt = clientPointToCanvas(e.clientX, e.clientY);
+  if (!pt) return;
+  const dx = e.clientX - (state.deviceDrag.clientX || e.clientX);
+  const dy = e.clientY - (state.deviceDrag.clientY || e.clientY);
+  if (Math.abs(dx) > 2 || Math.abs(dy) > 2 || state.deviceDrag.moved) {
+    state.deviceDrag.moved = true;
+  }
+  state.deviceDrag.clientX = e.clientX;
+  state.deviceDrag.clientY = e.clientY;
+  state.deviceDrag.currentX = pt.x;
+  state.deviceDrag.currentY = pt.y;
+  state.deviceDrag.overCanvas = pt.overCanvas;
+  if (pt.overCanvas) {
+    elements.canvas.style.cursor = 'crosshair';
+  }
+  renderFloorPlan();
+}
+
+async function handleDocumentDeviceDragUp(e) {
+  if (!state.deviceDrag) return;
+  const pt = clientPointToCanvas(e.clientX, e.clientY);
+  if (pt) {
+    state.deviceDrag.currentX = pt.x;
+    state.deviceDrag.currentY = pt.y;
+    state.deviceDrag.overCanvas = pt.overCanvas;
+  }
+  if (!state.deviceDrag.moved) {
+    cancelDeviceDrag({ suppressClick: state.deviceDrag.source === 'unplaced' });
+    return;
+  }
+  if (!state.deviceDrag.overCanvas) {
+    cancelDeviceDrag();
+    return;
+  }
+  await finishDeviceDrag();
+}
+
+function attachDeviceDragListeners() {
+  if (deviceDragListenersAttached) return;
+  document.addEventListener('mousemove', handleDocumentDeviceDragMove);
+  document.addEventListener('mouseup', handleDocumentDeviceDragUp);
+  deviceDragListenersAttached = true;
+}
+
+function detachDeviceDragListeners() {
+  if (!deviceDragListenersAttached) return;
+  document.removeEventListener('mousemove', handleDocumentDeviceDragMove);
+  document.removeEventListener('mouseup', handleDocumentDeviceDragUp);
+  deviceDragListenersAttached = false;
+}
+
+function isApUnplaced(ap) {
+  if (!ap) return true;
+  const pos = ap.position;
+  if (!pos || !pos.floorplanId) return true;
+  return typeof pos.xPercent !== 'number' || typeof pos.yPercent !== 'number';
+}
+
+function isSwitchUnplaced(sw) {
+  if (!sw) return true;
+  if (!sw.floorplanId) return true;
+  return typeof sw.xPercent !== 'number' || typeof sw.yPercent !== 'number';
+}
+
+function getUnplacedVenueDevices() {
+  const aps = (state.venueDevices.accessPoints || [])
+    .filter((ap) => isApUnplaced(ap))
+    .map((device) => ({
+      type: 'ap',
+      device,
+      key: accessPointKey(device),
+      name: device.name || device.serialNumber || 'Unnamed AP',
+      subtitle: [device.serialNumber, device.mac || device.macAddress].filter(Boolean).join(' · ')
+    }));
+  const switches = (state.venueDevices.switches || [])
+    .filter((sw) => isSwitchUnplaced(sw))
+    .map((device) => ({
+      type: 'switch',
+      device,
+      key: switchKey(device),
+      name: switchHostname(device) || device.id || 'Unnamed Switch',
+      subtitle: [device.id, device.serialNumber || device.switchSerial, device.switchMac]
+        .filter(Boolean)
+        .join(' · ')
+    }));
+  return [...aps, ...switches].sort((a, b) =>
+    String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' })
+  );
+}
+
+function unplacedEntryMatchesSearch(entry, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return true;
+  const macQ = normalizeMacForSearch(q);
+  const hay = [
+    entry.name,
+    entry.subtitle,
+    entry.device.serialNumber,
+    entry.device.mac,
+    entry.device.macAddress,
+    entry.device.switchMac,
+    entry.device.id
+  ]
+    .filter(Boolean)
+    .map((v) => String(v).toLowerCase());
+  if (hay.some((h) => h.includes(q))) return true;
+  if (macQ && macQ.length >= 4) {
+    return hay.some((h) => normalizeMacForSearch(h).includes(macQ));
+  }
+  return false;
+}
+
+function renderUnplacedDevicesPanel() {
+  if (!elements.unplacedDevicesPanel || !elements.unplacedDevicesList) return;
+
+  const all = getUnplacedVenueDevices();
+  const filtered = all.filter((entry) => unplacedEntryMatchesSearch(entry, state.unplacedSearchQuery));
+  const show =
+    state.editMode &&
+    !state.unplacedPanelDismissed &&
+    all.length > 0;
+
+  elements.unplacedDevicesPanel.classList.toggle('hidden', !show);
+  if (elements.unplacedDevicesTitle) {
+    elements.unplacedDevicesTitle.textContent = `Unplaced Devices (${all.length})`;
+  }
+  if (!show) {
+    elements.unplacedDevicesList.innerHTML = '';
+    return;
+  }
+
+  if (filtered.length === 0) {
+    elements.unplacedDevicesList.innerHTML =
+      '<div class="unplaced-devices-empty">No matching unplaced devices.</div>';
+    return;
+  }
+
+  elements.unplacedDevicesList.innerHTML = filtered.map((entry) => {
+    const kindClass = entry.type === 'switch' ? 'switch' : '';
+    const kindLabel = entry.type === 'switch' ? 'SW' : 'AP';
+    return `
+      <div class="unplaced-device-row" data-type="${entry.type}" data-key="${encodeURIComponent(entry.key)}" title="Drag onto the floor plan">
+        <span class="unplaced-device-kind ${kindClass}">${kindLabel}</span>
+        <div class="unplaced-device-meta">
+          <div class="unplaced-device-name">${escapeHtml(entry.name)}</div>
+          ${entry.subtitle ? `<div class="unplaced-device-sub">${escapeHtml(entry.subtitle)}</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function updateUnplacedEditBadge() {
+  const badge = elements.editUnplacedBadge;
+  if (!badge) return;
+
+  const count = state.venueDevices.fetchedAt ? getUnplacedVenueDevices().length : 0;
+  const show = count > 0;
+  badge.classList.toggle('hidden', !show);
+  badge.setAttribute('aria-hidden', show ? 'false' : 'true');
+  if (show) {
+    badge.textContent = count > 99 ? '99+' : String(count);
+  } else {
+    badge.textContent = '';
+  }
+
+  if (elements.editModeBtn) {
+    const baseTitle = 'Edit device locations (requires Administrator Scope)';
+    const baseLabel = 'Edit device locations';
+    if (show) {
+      const noun = count === 1 ? 'unplaced device' : 'unplaced devices';
+      elements.editModeBtn.title = `${baseTitle} — ${count} ${noun}`;
+      elements.editModeBtn.setAttribute('aria-label', `${baseLabel}, ${count} ${noun}`);
+    } else {
+      elements.editModeBtn.title = baseTitle;
+      elements.editModeBtn.setAttribute('aria-label', baseLabel);
+    }
+  }
+}
+
+function syncEditModeUi() {
+  if (elements.editModeBtn) {
+    elements.editModeBtn.classList.toggle('active', !!state.editMode);
+    elements.editModeBtn.setAttribute('aria-pressed', state.editMode ? 'true' : 'false');
+  }
+  if (elements.editModeBanner) {
+    const showBanner = state.editMode && !state.editBannerDismissed;
+    elements.editModeBanner.classList.toggle('hidden', !showBanner);
+  }
+  renderUnplacedDevicesPanel();
+  updateUnplacedEditBadge();
+  if (elements.canvas && !state.deviceDrag && !state.isPanning) {
+    elements.canvas.style.cursor = state.editMode
+      ? 'default'
+      : (state.zoom > 1 ? 'grab' : 'default');
+  }
+}
+
+function setEditMode(on) {
+  if (!on && state.deviceDrag) cancelDeviceDrag();
+  const enabling = !!on && !state.editMode;
+  state.editMode = !!on;
+  if (enabling) {
+    state.editBannerDismissed = false;
+    state.unplacedPanelDismissed = false;
+    state.unplacedSearchQuery = '';
+    if (elements.unplacedDevicesSearch) elements.unplacedDevicesSearch.value = '';
+  }
+  if (!on) {
+    state.editBannerDismissed = false;
+    state.unplacedPanelDismissed = false;
+  }
+  syncEditModeUi();
+}
+
+async function toggleEditMode() {
+  if (state.editMode) {
+    setEditMode(false);
+    return;
+  }
+  if (!state.selectedVenue || !state.selectedFloorPlan) {
+    alert('Open a floor plan before editing device locations.');
+    return;
+  }
+
+  if (elements.editModeBtn) elements.editModeBtn.disabled = true;
+  try {
+    const ok = await ensurePlacementWriteAccess();
+    if (!ok) {
+      setEditMode(false);
+      return;
+    }
+    setEditMode(true);
+  } finally {
+    if (elements.editModeBtn) elements.editModeBtn.disabled = false;
+  }
+}
+
+function pickProbeDevice() {
+  const ap = getVisibleAccessPoints().find(
+    (a) => a.serialNumber && a.position && a.position.floorplanId
+  );
+  if (ap) {
+    return { type: 'ap', deviceId: ap.serialNumber };
+  }
+  const sw = getVisibleSwitches().find((s) => s.id && s.floorplanId);
+  if (sw) {
+    return { type: 'switch', deviceId: sw.id };
+  }
+  const unplaced = getUnplacedVenueDevices();
+  for (const entry of unplaced) {
+    if (entry.type === 'ap' && entry.device.serialNumber) {
+      return { type: 'ap', deviceId: entry.device.serialNumber };
+    }
+    if (entry.type === 'switch' && entry.device.id) {
+      return { type: 'switch', deviceId: entry.device.id };
+    }
+  }
+  return null;
+}
+
+async function ensurePlacementWriteAccess() {
+  if (state.canWritePositions === true) return true;
+  if (state.canWritePositions === false) {
+    alert(ADMIN_SCOPE_MESSAGE);
+    return false;
+  }
+
+  const probeTarget = pickProbeDevice();
+  if (!probeTarget) {
+    alert('No devices available to verify write access. Ensure this venue has at least one AP or switch.');
+    return false;
+  }
+
+  const result = await window.api.probePlacementWriteAccess({
+    type: probeTarget.type,
+    venueId: state.selectedVenue.id,
+    floorPlanId: state.selectedFloorPlan.id,
+    deviceId: probeTarget.deviceId
+  });
+
+  if (!result.success) {
+    if (result.statusCode === 403) {
+      state.canWritePositions = false;
+      alert(ADMIN_SCOPE_MESSAGE);
+      return false;
+    }
+    alert(`Could not verify write access: ${result.error || 'Unknown error'}`);
+    return false;
+  }
+
+  state.canWritePositions = !!result.canWrite;
+  if (!state.canWritePositions) {
+    alert(ADMIN_SCOPE_MESSAGE);
+    return false;
+  }
+  return true;
+}
+
+function canvasPointToPercent(canvasX, canvasY) {
+  const scale = getMapDrawScale();
+  if (!scale || scale.scaledWidth <= 0 || scale.scaledHeight <= 0) return null;
+  const xPercent = ((canvasX - state.offsetX) / scale.scaledWidth) * 100;
+  const yPercent = ((canvasY - state.offsetY) / scale.scaledHeight) * 100;
+  return {
+    xPercent: Math.min(100, Math.max(0, xPercent)),
+    yPercent: Math.min(100, Math.max(0, yPercent))
+  };
+}
+
+function beginDeviceDrag(hit, mouseX, mouseY, clientX, clientY, source = 'map') {
+  let origXPercent = null;
+  let origYPercent = null;
+  if (source === 'map') {
+    if (hit.type === 'ap') {
+      origXPercent = hit.device.position.xPercent;
+      origYPercent = hit.device.position.yPercent;
+    } else {
+      origXPercent = hit.device.xPercent;
+      origYPercent = hit.device.yPercent;
+    }
+  }
+  state.deviceDrag = {
+    type: hit.type,
+    device: hit.device,
+    key: hit.key,
+    source,
+    origXPercent,
+    origYPercent,
+    currentX: mouseX,
+    currentY: mouseY,
+    clientX: clientX ?? mouseX,
+    clientY: clientY ?? mouseY,
+    overCanvas: source === 'map',
+    moved: false
+  };
+  state.didDeviceDrag = false;
+  if (source === 'map') elements.canvas.style.cursor = 'crosshair';
+  attachDeviceDragListeners();
+  renderFloorPlan();
+}
+
+function handleUnplacedListMouseDown(e) {
+  if (!state.editMode || !state.canWritePositions) return;
+  const row = e.target.closest('.unplaced-device-row');
+  if (!row) return;
+  e.preventDefault();
+  const type = row.dataset.type;
+  let key = row.dataset.key || '';
+  try {
+    key = decodeURIComponent(key);
+  } catch (_) {
+    /* keep raw */
+  }
+  const entry = getUnplacedVenueDevices().find((item) => item.type === type && item.key === key);
+  if (!entry) return;
+  const pt = clientPointToCanvas(e.clientX, e.clientY) || { x: 0, y: 0, overCanvas: false };
+  beginDeviceDrag(
+    { type: entry.type, device: entry.device, key: entry.key },
+    pt.x,
+    pt.y,
+    e.clientX,
+    e.clientY,
+    'unplaced'
+  );
+}
+
+function cancelDeviceDrag({ suppressClick = true } = {}) {
+  if (!state.deviceDrag) return;
+  state.deviceDrag = null;
+  state.didDeviceDrag = suppressClick;
+  detachDeviceDragListeners();
+  syncEditModeUi();
+  renderFloorPlan();
+}
+
+function applyLocalDevicePosition(type, device, xPercent, yPercent) {
+  if (type === 'ap') {
+    if (!device.position) device.position = {};
+    device.position.xPercent = xPercent;
+    device.position.yPercent = yPercent;
+    device.position.floorplanId = state.selectedFloorPlan.id;
+    const serial = device.serialNumber;
+    const mac = device.mac || device.macAddress;
+    (state.venueDevices.accessPoints || []).forEach((ap) => {
+      if (
+        (serial && ap.serialNumber === serial) ||
+        (mac && (ap.mac === mac || ap.macAddress === mac))
+      ) {
+        if (!ap.position) ap.position = {};
+        ap.position.xPercent = xPercent;
+        ap.position.yPercent = yPercent;
+        ap.position.floorplanId = state.selectedFloorPlan.id;
+      }
+    });
+    return;
+  }
+
+  device.xPercent = xPercent;
+  device.yPercent = yPercent;
+  device.floorplanId = state.selectedFloorPlan.id;
+  const id = device.id;
+  (state.venueDevices.switches || []).forEach((sw) => {
+    if (id && sw.id === id) {
+      sw.xPercent = xPercent;
+      sw.yPercent = yPercent;
+      sw.floorplanId = state.selectedFloorPlan.id;
+    }
+  });
+}
+
+function clearLocalDevicePlacement(type, device) {
+  if (type === 'ap') {
+    if (device.position) {
+      delete device.position.floorplanId;
+      delete device.position.xPercent;
+      delete device.position.yPercent;
+    }
+    const serial = device.serialNumber;
+    const mac = device.mac || device.macAddress;
+    (state.venueDevices.accessPoints || []).forEach((ap) => {
+      if (
+        (serial && ap.serialNumber === serial) ||
+        (mac && (ap.mac === mac || ap.macAddress === mac))
+      ) {
+        if (ap.position) {
+          delete ap.position.floorplanId;
+          delete ap.position.xPercent;
+          delete ap.position.yPercent;
+        }
+      }
+    });
+    state.accessPoints = (state.accessPoints || []).filter(
+      (ap) => accessPointKey(ap) !== accessPointKey(device)
+    );
+    return;
+  }
+
+  delete device.floorplanId;
+  delete device.xPercent;
+  delete device.yPercent;
+  const id = device.id;
+  (state.venueDevices.switches || []).forEach((sw) => {
+    if (id && sw.id === id) {
+      delete sw.floorplanId;
+      delete sw.xPercent;
+      delete sw.yPercent;
+    }
+  });
+  state.switches = (state.switches || []).filter((sw) => switchKey(sw) !== switchKey(device));
+}
+
+function ensureDeviceOnCurrentFloorLists(type, device) {
+  if (type === 'ap') {
+    const key = accessPointKey(device);
+    if (!(state.accessPoints || []).some((ap) => accessPointKey(ap) === key)) {
+      state.accessPoints = [...(state.accessPoints || []), device];
+    }
+    return;
+  }
+  const key = switchKey(device);
+  if (!(state.switches || []).some((sw) => switchKey(sw) === key)) {
+    state.switches = [...(state.switches || []), device];
+  }
+}
+
+async function finishDeviceDrag() {
+  const drag = state.deviceDrag;
+  if (!drag) return;
+
+  const fromUnplaced = drag.source === 'unplaced';
+  if (!drag.moved && !fromUnplaced) {
+    state.deviceDrag = null;
+    detachDeviceDragListeners();
+    syncEditModeUi();
+    renderFloorPlan();
+    return;
+  }
+
+  if (!drag.overCanvas) {
+    cancelDeviceDrag();
+    return;
+  }
+
+  const pct = canvasPointToPercent(drag.currentX, drag.currentY);
+  state.deviceDrag = null;
+  state.didDeviceDrag = true;
+  detachDeviceDragListeners();
+
+  if (!pct) {
+    syncEditModeUi();
+    renderFloorPlan();
+    return;
+  }
+
+  const deviceId = drag.type === 'ap'
+    ? drag.device.serialNumber
+    : drag.device.id;
+  if (!deviceId) {
+    alert('Cannot update this device: missing serial number or switch id.');
+    syncEditModeUi();
+    renderFloorPlan();
+    return;
+  }
+
+  // Optimistic local place / move
+  applyLocalDevicePosition(drag.type, drag.device, pct.xPercent, pct.yPercent);
+  if (fromUnplaced) ensureDeviceOnCurrentFloorLists(drag.type, drag.device);
+  renderFloorPlan();
+  syncEditModeUi();
+
+  const result = await window.api.updateDevicePosition({
+    type: drag.type,
+    venueId: state.selectedVenue.id,
+    floorPlanId: state.selectedFloorPlan.id,
+    deviceId,
+    xPercent: pct.xPercent,
+    yPercent: pct.yPercent
+  });
+
+  if (!result.success) {
+    if (fromUnplaced) {
+      clearLocalDevicePlacement(drag.type, drag.device);
+    } else {
+      applyLocalDevicePosition(
+        drag.type,
+        drag.device,
+        drag.origXPercent,
+        drag.origYPercent
+      );
+    }
+    renderFloorPlan();
+    syncEditModeUi();
+    if (result.statusCode === 403) {
+      state.canWritePositions = false;
+      setEditMode(false);
+      alert(ADMIN_SCOPE_MESSAGE);
+    } else {
+      alert(`Failed to update device location: ${result.error || 'Unknown error'}`);
+    }
   }
 }
 
@@ -3947,6 +4844,350 @@ function handleClearAPSearch() {
   state.searchKeyboardIndex = -1;
   closeAPSearchPopup();
   renderFloorPlan();
+}
+
+// ---- FR#17 Global Search ----
+
+function clearGlobalSearchState() {
+  state.globalSearchIndex = null;
+  state.globalSearchHits = [];
+  state.globalSearchBuilding = false;
+  state.pendingSearchFocus = null;
+}
+
+function openGlobalSearchModal() {
+  if (!elements.globalSearchModal) return;
+  elements.globalSearchModal.classList.remove('hidden');
+  setGlobalSearchStatus('');
+  if (!state.globalSearchHits.length) {
+    renderGlobalSearchPlaceholder('Enter a hostname, serial, MAC, or IP, then press Search.');
+  }
+  updateGlobalSearchRefreshEnabled();
+  setTimeout(() => {
+    if (elements.globalSearchInput) elements.globalSearchInput.focus();
+  }, 50);
+}
+
+function closeGlobalSearchModal({ cancelIndex = false } = {}) {
+  if (cancelIndex && state.globalSearchBuilding && window.api.cancelGlobalSearchIndex) {
+    window.api.cancelGlobalSearchIndex();
+  }
+  if (elements.globalSearchModal) {
+    elements.globalSearchModal.classList.add('hidden');
+  }
+  hideGlobalSearchProgress();
+}
+
+function updateGlobalSearchRefreshEnabled() {
+  if (!elements.globalSearchRefresh) return;
+  elements.globalSearchRefresh.disabled = !state.globalSearchIndex || state.globalSearchBuilding;
+}
+
+function setGlobalSearchStatus(message, { error = false } = {}) {
+  if (!elements.globalSearchStatus) return;
+  elements.globalSearchStatus.textContent = message || '';
+  elements.globalSearchStatus.classList.toggle('is-error', !!error);
+}
+
+function showGlobalSearchProgress() {
+  if (elements.globalSearchProgress) {
+    elements.globalSearchProgress.classList.remove('hidden');
+  }
+}
+
+function hideGlobalSearchProgress() {
+  if (elements.globalSearchProgress) {
+    elements.globalSearchProgress.classList.add('hidden');
+  }
+}
+
+function updateGlobalSearchProgress(info = {}) {
+  const percent = Number.isFinite(info.percent) ? Math.max(0, Math.min(100, info.percent)) : 0;
+  if (elements.globalSearchProgressFill) {
+    elements.globalSearchProgressFill.style.width = `${percent}%`;
+  }
+  if (elements.globalSearchProgressText) {
+    const detail = info.message || 'Working…';
+    const counts = Number.isFinite(info.done) && Number.isFinite(info.total)
+      ? `${info.done} / ${info.total} · `
+      : '';
+    elements.globalSearchProgressText.textContent = `${counts}${detail}`;
+  }
+}
+
+function renderGlobalSearchPlaceholder(text) {
+  if (!elements.globalSearchResults) return;
+  elements.globalSearchResults.innerHTML =
+    `<div class="global-search-placeholder">${escapeHtml(text)}</div>`;
+}
+
+function venueNameById(venueId) {
+  const venue = state.venues.find((v) => v.id === venueId);
+  return venue?.name || venueId || 'Unknown Venue';
+}
+
+function floorNameFromIndex(floorPlanId, floorsById) {
+  if (!floorPlanId) return 'Unassigned';
+  const meta = floorsById && floorsById[floorPlanId];
+  return meta?.name || 'Unknown Floor';
+}
+
+function deviceFloorPlanId(type, device) {
+  if (type === 'ap') {
+    return device?.position?.floorplanId || null;
+  }
+  return device?.floorplanId || null;
+}
+
+function deviceVenueId(type, device) {
+  return device?.venueId || null;
+}
+
+function matchGlobalSearchHits(query, index) {
+  const hits = [];
+  const floorsById = index.floorsById || {};
+
+  for (const ap of index.accessPoints || []) {
+    if (!deviceMatchesSearch(query, accessPointSearchFields(ap))) continue;
+    const floorPlanId = deviceFloorPlanId('ap', ap);
+    const venueId = deviceVenueId('ap', ap);
+    hits.push({
+      type: 'ap',
+      device: ap,
+      key: accessPointKey(ap),
+      name: searchResultName({ type: 'ap', device: ap }),
+      venueId,
+      venueName: venueNameById(venueId),
+      floorPlanId,
+      floorName: floorNameFromIndex(floorPlanId, floorsById)
+    });
+  }
+
+  for (const sw of index.switches || []) {
+    if (!deviceMatchesSearch(query, switchSearchFields(sw))) continue;
+    const floorPlanId = deviceFloorPlanId('switch', sw);
+    const venueId = deviceVenueId('switch', sw);
+    hits.push({
+      type: 'switch',
+      device: sw,
+      key: switchKey(sw),
+      name: searchResultName({ type: 'switch', device: sw }),
+      venueId,
+      venueName: venueNameById(venueId),
+      floorPlanId,
+      floorName: floorNameFromIndex(floorPlanId, floorsById)
+    });
+  }
+
+  hits.sort((a, b) => {
+    const venueCmp = (a.venueName || '').localeCompare(b.venueName || '', undefined, { sensitivity: 'base' });
+    if (venueCmp) return venueCmp;
+    const floorCmp = (a.floorName || '').localeCompare(b.floorName || '', undefined, { sensitivity: 'base' });
+    if (floorCmp) return floorCmp;
+    return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+  });
+
+  return hits;
+}
+
+function renderGlobalSearchResults(hits, query) {
+  if (!elements.globalSearchResults) return;
+  elements.globalSearchResults.innerHTML = '';
+
+  if (!hits.length) {
+    elements.globalSearchResults.innerHTML =
+      `<div class="global-search-empty">No devices found for “${escapeHtml(query)}”.</div>`;
+    return;
+  }
+
+  hits.forEach((hit) => {
+    const row = document.createElement('div');
+    row.className = 'global-search-hit';
+    row.setAttribute('role', 'listitem');
+
+    const kind = hit.type === 'switch' ? 'Switch' : 'AP';
+    // Jump only when the device is placed on a floor plan (Unassigned goes nowhere).
+    const canJump = Boolean(hit.venueId && hit.floorPlanId);
+    if (!canJump) row.classList.add('is-disabled');
+
+    const floorLabel = hit.floorPlanId
+      ? escapeHtml(hit.floorName || 'Unknown Floor')
+      : '<span class="global-search-unassigned">Unassigned</span>';
+
+    row.innerHTML = `
+      <div class="global-search-hit-body">
+        <div class="global-search-hit-title">
+          Found ${escapeHtml(hit.name || 'Unnamed')}
+          <span class="global-search-hit-kind">${kind}</span>
+        </div>
+        <div class="global-search-hit-meta">
+          Venue: ${escapeHtml(hit.venueName || 'Unknown')} · Floor: ${floorLabel}
+        </div>
+      </div>
+      ${canJump ? '<button type="button" class="global-search-hit-jump">Jump</button>' : ''}
+    `;
+
+    const jump = () => {
+      if (!canJump) return;
+      navigateToGlobalSearchHit(hit, query);
+    };
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.global-search-hit-jump') || canJump) jump();
+    });
+    const jumpBtn = row.querySelector('.global-search-hit-jump');
+    if (jumpBtn) {
+      jumpBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        jump();
+      });
+    }
+
+    elements.globalSearchResults.appendChild(row);
+  });
+}
+
+async function ensureGlobalSearchIndex({ forceRefresh = false } = {}) {
+  if (!forceRefresh && state.globalSearchIndex?.fetchedAt) {
+    return { success: true, data: state.globalSearchIndex, fromCache: true };
+  }
+  if (!state.tenantId) {
+    return { success: false, error: 'Not authenticated' };
+  }
+
+  state.globalSearchBuilding = true;
+  updateGlobalSearchRefreshEnabled();
+  if (elements.globalSearchSubmit) elements.globalSearchSubmit.disabled = true;
+  showGlobalSearchProgress();
+  updateGlobalSearchProgress({ percent: 0, done: 0, total: 1, message: 'Starting…' });
+  setGlobalSearchStatus('Building device index…');
+
+  const stopProgress = window.api.onGlobalSearchProgress
+    ? window.api.onGlobalSearchProgress((info) => updateGlobalSearchProgress(info))
+    : () => {};
+
+  try {
+    const venues = (state.venues || []).map((v) => ({ id: v.id, name: v.name || v.id }));
+    const result = await window.api.buildGlobalSearchIndex({
+      tenantId: state.tenantId,
+      venues
+    });
+
+    if (result.cancelled) {
+      setGlobalSearchStatus('Index build cancelled.');
+      return { success: false, cancelled: true };
+    }
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to build search index');
+    }
+
+    state.globalSearchIndex = result.data;
+    setGlobalSearchStatus(
+      `Indexed ${result.data.accessPoints.length} APs · ${result.data.switches.length} switches`
+    );
+    return { success: true, data: result.data, fromCache: false };
+  } catch (error) {
+    setGlobalSearchStatus(error.message || 'Failed to build search index', { error: true });
+    return { success: false, error: error.message };
+  } finally {
+    stopProgress();
+    state.globalSearchBuilding = false;
+    hideGlobalSearchProgress();
+    if (elements.globalSearchSubmit) elements.globalSearchSubmit.disabled = false;
+    updateGlobalSearchRefreshEnabled();
+  }
+}
+
+async function runGlobalSearch({ forceRefresh = false } = {}) {
+  const query = (elements.globalSearchInput?.value || '').trim();
+  if (!query) {
+    setGlobalSearchStatus('Enter a search value.', { error: true });
+    renderGlobalSearchPlaceholder('Enter a hostname, serial, MAC, or IP, then press Search.');
+    elements.globalSearchInput?.focus();
+    return;
+  }
+  if (state.globalSearchBuilding) return;
+
+  const indexResult = await ensureGlobalSearchIndex({ forceRefresh });
+  if (!indexResult.success || !indexResult.data) {
+    if (!indexResult.cancelled) {
+      state.globalSearchHits = [];
+      renderGlobalSearchPlaceholder('Could not build the device index.');
+    }
+    return;
+  }
+
+  const hits = matchGlobalSearchHits(query, indexResult.data);
+  state.globalSearchHits = hits;
+  renderGlobalSearchResults(hits, query);
+
+  const cacheNote = indexResult.fromCache ? ' (cached index)' : '';
+  setGlobalSearchStatus(
+    hits.length
+      ? `${hits.length} match${hits.length === 1 ? '' : 'es'}${cacheNote}`
+      : `No matches${cacheNote}`
+  );
+  updateGlobalSearchRefreshEnabled();
+}
+
+function applyPendingSearchFocus() {
+  const pending = state.pendingSearchFocus;
+  if (!pending) return;
+
+  let entry = null;
+  if (pending.type === 'ap') {
+    const ap = (state.accessPoints || []).find((d) => accessPointKey(d) === pending.key);
+    if (ap) entry = { type: 'ap', device: ap };
+  } else if (pending.type === 'switch') {
+    const sw = (state.switches || []).find((d) => switchKey(d) === pending.key);
+    if (sw) entry = { type: 'switch', device: sw };
+  }
+
+  state.pendingSearchFocus = null;
+  if (!entry) return;
+
+  selectDeviceFromSearch(entry);
+  if (pending.queryText && elements.apSearch) {
+    // Keep the user's global query text in the floor search box when useful;
+    // prefer the device hostname for the pulse selection display.
+    elements.apSearch.value = searchResultName(entry);
+  }
+  openAPSearchForShortcut();
+}
+
+async function navigateToGlobalSearchHit(hit, queryText) {
+  if (!hit?.venueId || !hit?.floorPlanId) return;
+
+  closeGlobalSearchModal();
+
+  const venue = state.venues.find((v) => v.id === hit.venueId);
+  if (!venue) {
+    console.warn('[GlobalSearch] Venue not found for hit:', hit.venueId);
+    return;
+  }
+
+  const query = (queryText || elements.globalSearchInput?.value || '').trim();
+  state.pendingSearchFocus = {
+    type: hit.type,
+    key: hit.key,
+    queryText: query
+  };
+
+  await selectVenue(venue);
+
+  let floorPlan = (state.floorPlans || []).find((fp) => fp.id === hit.floorPlanId);
+  if (!floorPlan && state.globalSearchIndex?.floorsById?.[hit.floorPlanId]) {
+    // Floor metadata existed in the index but list may have failed; retry load once.
+    await loadFloorPlans();
+    floorPlan = (state.floorPlans || []).find((fp) => fp.id === hit.floorPlanId);
+  }
+
+  if (!floorPlan) {
+    state.pendingSearchFocus = null;
+    console.warn('[GlobalSearch] Floor plan not found:', hit.floorPlanId);
+    return;
+  }
+
+  await selectFloorPlan(floorPlan);
 }
 
 // Toggle AP Search Popup
@@ -4527,9 +5768,11 @@ async function runPoeQuery(aps, { replaceAll }) {
     elements.progressText.textContent = 'PoE query failed';
     elements.currentApText.textContent = error.message || 'Unknown error';
     state.poeQueryInProgress = false;
+    // Rate-limit copy is longer; give the user time to read it.
+    const dismissMs = /rate limit|HTTP 429/i.test(error.message || '') ? 10000 : 2500;
     setTimeout(() => {
       elements.poeProgressModal.classList.add('hidden');
-    }, 2500);
+    }, dismissMs);
     return false;
   } finally {
     stopProgress();

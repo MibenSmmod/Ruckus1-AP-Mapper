@@ -1,5 +1,15 @@
 const https = require('https');
 
+// Shown when RUCKUS One returns HTTP 429 (token-bucket rate limit, ~2000 calls/min per tenant).
+const RATE_LIMIT_USER_MESSAGE =
+  'Rate limit reached (HTTP 429). RUCKUS One temporarily blocked API calls because this tenant exceeded its request quota (about 2,000 calls per minute). Wait about a minute and try again. Large PoE & LLDP queries are a common cause.';
+
+function rateLimitError() {
+  const error = new Error(RATE_LIMIT_USER_MESSAGE);
+  error.statusCode = 429;
+  return error;
+}
+
 // Regional API endpoints
 // Both auth and API use api.{region}.ruckus.cloud
 const REGIONS = {
@@ -48,6 +58,11 @@ class RuckusAPI {
           // Handle redirects as errors for API calls
           if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
             reject(new Error(`Authentication failed (HTTP ${res.statusCode}). Please check your Region, Tenant ID, Client ID, and Client Secret.`));
+            return;
+          }
+
+          if (res.statusCode === 429) {
+            reject(rateLimitError());
             return;
           }
 
@@ -100,6 +115,10 @@ class RuckusAPI {
         });
 
         res.on('end', () => {
+          if (res.statusCode === 429) {
+            reject(rateLimitError());
+            return;
+          }
           if (res.statusCode >= 200 && res.statusCode < 300) {
             const buffer = Buffer.concat(chunks);
             const contentType = res.headers['content-type'] || 'image/png';
@@ -258,6 +277,10 @@ class RuckusAPI {
           const chunks = [];
           res.on('data', (chunk) => chunks.push(chunk));
           res.on('end', () => {
+            if (res.statusCode === 429) {
+              reject(rateLimitError());
+              return;
+            }
             if (res.statusCode >= 200 && res.statusCode < 300) {
               const buffer = Buffer.concat(chunks);
               const contentType = res.headers['content-type'] || 'image/png';
@@ -298,8 +321,8 @@ class RuckusAPI {
     return await this._request(options, postData);
   }
 
-  // Get access points (all APs, then filter by venue)
-  async getAccessPoints(tenantId, venueId) {
+  // All tenant APs (placement + identity). No radio/client enrichment.
+  async getAllAccessPoints(tenantId) {
     await this._ensureAuthenticated();
 
     const options = {
@@ -315,11 +338,13 @@ class RuckusAPI {
     };
 
     const allAPs = await this._request(options);
-    // Filter APs by venue ID
-    if (Array.isArray(allAPs)) {
-      return allAPs.filter(ap => ap.venueId === venueId);
-    }
-    return allAPs;
+    return Array.isArray(allAPs) ? allAPs : [];
+  }
+
+  // Get access points (all APs, then filter by venue)
+  async getAccessPoints(tenantId, venueId) {
+    const allAPs = await this.getAllAccessPoints(tenantId);
+    return allAPs.filter(ap => ap.venueId === venueId);
   }
 
   // JSON API call. Uses the RUCKUS One v1 media type the PoE endpoints expect.
@@ -353,6 +378,9 @@ class RuckusAPI {
           await delay(2 ** attempt * 1000);
           continue;
         }
+        if (error.statusCode === 429) {
+          throw rateLimitError();
+        }
         throw error;
       }
     }
@@ -368,9 +396,7 @@ class RuckusAPI {
         });
         res.on('end', () => {
           if (res.statusCode === 429) {
-            const error = new Error('HTTP 429');
-            error.statusCode = 429;
-            reject(error);
+            reject(rateLimitError());
             return;
           }
           if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -424,32 +450,46 @@ class RuckusAPI {
     );
   }
 
+  // ICX switches: identity, placement, status. Optional venue filter.
+  static get SWITCH_QUERY_FIELDS() {
+    return [
+      'id',
+      'switchName',
+      'name',
+      'provisionName',
+      'deviceStatus',
+      'floorplanId',
+      'xPercent',
+      'yPercent',
+      'venueId',
+      'isStack',
+      'deviceType',
+      'model',
+      'switchMac',
+      'ipAddress',
+      'uptime',
+      'alerts',
+      'clientCount',
+      'poeUtilization',
+      'poeTotal',
+      'poeFree'
+    ];
+  }
+
+  // Prefer tenant-wide (no venue filter) for global search.
+  async getAllSwitches() {
+    return this.queryAll(
+      '/venues/switches/query',
+      RuckusAPI.SWITCH_QUERY_FIELDS,
+      null
+    );
+  }
+
   // ICX switches for a venue, including floor-plan placement and status.
   async getSwitches(venueId) {
     return this.queryAll(
       '/venues/switches/query',
-      [
-        'id',
-        'switchName',
-        'name',
-        'provisionName',
-        'deviceStatus',
-        'floorplanId',
-        'xPercent',
-        'yPercent',
-        'venueId',
-        'isStack',
-        'deviceType',
-        'model',
-        'switchMac',
-        'ipAddress',
-        'uptime',
-        'alerts',
-        'clientCount',
-        'poeUtilization',
-        'poeTotal',
-        'poeFree'
-      ],
+      RuckusAPI.SWITCH_QUERY_FIELDS,
       { venueId: [venueId] }
     );
   }
@@ -561,10 +601,138 @@ class RuckusAPI {
     report(100, 'Complete', '');
     return poeResultsForAps(list, neighborsBySerial, portIndex);
   }
+
+  // --- FR#18: floor-plan placement writes (allowlisted PUT only) ---
+
+  _assertPlacementWritePath(method, path) {
+    if (method !== 'PUT') {
+      throw new Error('Placement write refused: only PUT is allowed');
+    }
+    if (typeof path !== 'string' || !(AP_FLOOR_POSITION_PATH.test(path) || SWITCH_POSITION_PATH.test(path))) {
+      throw new Error('Placement write refused: path is not an allowlisted floor-position endpoint');
+    }
+  }
+
+  _sanitizeApPositionBody(body) {
+    if (!body || typeof body !== 'object') {
+      throw new Error('Placement write refused: invalid AP position body');
+    }
+    const keys = Object.keys(body);
+    if (keys.length !== 2 || !keys.includes('xPercent') || !keys.includes('yPercent')) {
+      throw new Error('Placement write refused: AP body may only include xPercent and yPercent');
+    }
+    return {
+      xPercent: clampPercent(body.xPercent),
+      yPercent: clampPercent(body.yPercent)
+    };
+  }
+
+  _sanitizeSwitchPositionBody(body) {
+    if (!body || typeof body !== 'object') {
+      throw new Error('Placement write refused: invalid switch position body');
+    }
+    const keys = Object.keys(body);
+    if (
+      keys.length !== 3 ||
+      !keys.includes('floorPlanId') ||
+      !keys.includes('xPercent') ||
+      !keys.includes('yPercent')
+    ) {
+      throw new Error('Placement write refused: switch body may only include floorPlanId, xPercent, and yPercent');
+    }
+    if (!body.floorPlanId || typeof body.floorPlanId !== 'string') {
+      throw new Error('Placement write refused: floorPlanId is required');
+    }
+    return {
+      floorPlanId: body.floorPlanId,
+      xPercent: clampPercent(body.xPercent),
+      yPercent: clampPercent(body.yPercent)
+    };
+  }
+
+  // Private gate: only the two allowlisted position PUTs may proceed.
+  async _placementWrite(method, path, body) {
+    this._assertPlacementWritePath(method, path);
+    let sanitized;
+    if (AP_FLOOR_POSITION_PATH.test(path)) {
+      sanitized = this._sanitizeApPositionBody(body);
+    } else {
+      sanitized = this._sanitizeSwitchPositionBody(body);
+    }
+    return this.apiCall(method, path, sanitized);
+  }
+
+  async updateApFloorPosition({ venueId, floorPlanId, serialNumber, xPercent, yPercent }) {
+    if (!venueId || !floorPlanId || !serialNumber) {
+      throw new Error('venueId, floorPlanId, and serialNumber are required');
+    }
+    const path =
+      `/venues/${encodeURIComponent(venueId)}` +
+      `/floorplans/${encodeURIComponent(floorPlanId)}` +
+      `/aps/${encodeURIComponent(serialNumber)}/floorPositions`;
+    return this._placementWrite('PUT', path, { xPercent, yPercent });
+  }
+
+  async updateSwitchPosition({ venueId, switchId, floorPlanId, xPercent, yPercent }) {
+    if (!venueId || !switchId || !floorPlanId) {
+      throw new Error('venueId, switchId, and floorPlanId are required');
+    }
+    const path =
+      `/venues/${encodeURIComponent(venueId)}` +
+      `/switches/${encodeURIComponent(switchId)}/positions`;
+    return this._placementWrite('PUT', path, { floorPlanId, xPercent, yPercent });
+  }
+
+  // Probe write scope without moving the device: invalid coords → 400/422 if
+  // authorized, 403 if Read Only / insufficient scope.
+  async probePlacementWriteAccess({ type, venueId, floorPlanId, deviceId }) {
+    if (!venueId || !floorPlanId || !deviceId) {
+      throw new Error('venueId, floorPlanId, and deviceId are required to probe write access');
+    }
+    let path;
+    let body;
+    if (type === 'switch') {
+      path =
+        `/venues/${encodeURIComponent(venueId)}` +
+        `/switches/${encodeURIComponent(deviceId)}/positions`;
+      body = { floorPlanId, xPercent: -1, yPercent: 0 };
+    } else {
+      path =
+        `/venues/${encodeURIComponent(venueId)}` +
+        `/floorplans/${encodeURIComponent(floorPlanId)}` +
+        `/aps/${encodeURIComponent(deviceId)}/floorPositions`;
+      body = { xPercent: -1, yPercent: 0 };
+    }
+    this._assertPlacementWritePath('PUT', path);
+    try {
+      await this.apiCall('PUT', path, body);
+      // Unexpected success with invalid coords — still treat as writable.
+      return { canWrite: true };
+    } catch (error) {
+      const status = error.statusCode;
+      if (status === 403) return { canWrite: false, statusCode: 403 };
+      if (status === 400 || status === 422) return { canWrite: true, statusCode: status };
+      throw error;
+    }
+  }
 }
 
 const V1_ACCEPT = 'application/vnd.ruckus.v1+json';
 const PAGE_SIZE = 500;
+
+// FR#18 allowlist — the only R1 paths permitted for map placement writes.
+const AP_FLOOR_POSITION_PATH =
+  /^\/venues\/[^/]+\/floorplans\/[^/]+\/aps\/[^/]+\/floorPositions$/;
+const SWITCH_POSITION_PATH =
+  /^\/venues\/[^/]+\/switches\/[^/]+\/positions$/;
+
+function clampPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    throw new Error('Placement write refused: xPercent/yPercent must be a number');
+  }
+  return Math.min(100, Math.max(0, n));
+}
 const PORT_FIELDS = [
   'switchName', 'switchSerial', 'switchUnitId', 'portIdentifier', 'name',
   'status', 'poeEnabled', 'poeType', 'poeUsed', 'poeTotal', 'poeUsage',

@@ -33,6 +33,7 @@ macOS builds are signed and notarized by Apple, so they open normally. The Windo
 - Search APs by hostname or serial number
 - Zoom, pan, and font-size controls
 - Click device icon for more information (IP address, MAC address, etc.)
+- Edit mode (Administrator Scope): drag APs or switches to update floor-plan coordinates in RUCKUS One
 
 ## Screenshots
 
@@ -63,7 +64,7 @@ macOS builds are signed and notarized by Apple, so they open normally. The Windo
 ## Requirements
 
 - A Ruckus ONE account at [https://ruckus.cloud/](https://ruckus.cloud/)
-- An Application Token (Read Only recommended) and Tenant ID
+- An Application Token and Tenant ID — **Read Only** is recommended for viewing; use **Administrator** Scope to Edit and move device locations on the map
 - For running from source: Node.js 18 or higher
 
 ## Run from source

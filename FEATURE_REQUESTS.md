@@ -2,30 +2,31 @@
 
 Reference items in prompts by number, e.g. `Implement FR#9`.
 
-Status: `open` | `in progress` | `done` | `wontfix`
+Status: `🟢 open` | `in progress` | `done` | `wontfix`
 
 | ID | Status | Title |
 |----|--------|-------|
-| FR#1 | done | Export / share the view (PNG or PDF) |
-| FR#2 | done | Filter by band / status / model |
-| FR#3 | done | Channel / co-channel highlight |
-| FR#4 | done | PoE budget rollup |
-| FR#5 | done | Legend + summary strip |
-| FR#6 | done | Multi-floor jump / venue overview |
-| FR#7 | done | Client density (read-only) |
-| FR#8 | wontfix | Compare refresh (highlight changes) |
-| FR#9 | done | Cable / uplink hint from LLDP |
-| FR#10 | done | Favorites / recent venues |
-| FR#11 | done | Keyboard shortcuts |
-| FR#12 | done | Dark mode |
-| FR#13 | done | Offline / stale badge |
-| FR#14 | done | Check for updates upon app opening |
-| FR#15 | done | Search by device MAC address or IP Address |
-| FR#16 | done | Security issue:  The API credentials are 
-stored in plain text |
-| FR#17 | open | Global search |
-| FR#18 | open | Move devices on the map chaning their coordinates |
-| FR#19 | done | Map opacity |
+| [FR#1](#fr1--export--share-the-view) | done | Export / share the view (PNG or PDF) |
+| [FR#2](#fr2--filter-by-band--status--model) | done | Filter by band / status / model |
+| [FR#3](#fr3--channel--co-channel-highlight) | done | Channel / co-channel highlight |
+| [FR#4](#fr4--poe-budget-rollup) | done | PoE budget rollup |
+| [FR#5](#fr5--legend--summary-strip) | done | Legend + summary strip |
+| [FR#6](#fr6--multi-floor-jump--venue-overview) | done | Multi-floor jump / venue overview |
+| [FR#7](#fr7--client-density-read-only) | done | Client density (read-only) |
+| [FR#8](#fr8--compare-refresh) | wontfix | Compare refresh (highlight changes) |
+| [FR#9](#fr9--cable--uplink-hint-from-lldp) | done | Cable / uplink hint from LLDP |
+| [FR#10](#fr10--favorites--recent-venues) | done | Favorites / recent venues |
+| [FR#11](#fr11--keyboard-shortcuts) | done | Keyboard shortcuts |
+| [FR#12](#fr12--dark-mode) | done | Dark mode |
+| [FR#13](#fr13--offline--stale-badge) | done | Offline / stale badge |
+| [FR#14](#fr14--check-for-updates-upon-app-opening) | done | Check for updates upon app opening |
+| [FR#15](#fr15--search-by-device-mac-address-or-ip-address) | done | Search by device MAC address or IP Address |
+| [FR#16](#fr16---security-issue--the-api-credentials-are-stored-in-plain-text) | done | Security issue:  The API credentials are stored in plain text |
+| [FR#17](#fr17---global-search) | done | Global search |
+| [FR#18](#fr18---move-device-locations-on-the-map) | done | Move device locations on the map and update R1 |
+| [FR#19](#fr19---map-opacity) | done | Map opacity |
+| [FR#20](#fr20---create-a-getting-started-guide) | done | Create a getting started guide |
+| [FR#21](#fr21---placeholder) | 🟢 open | placeholder |
 
 ---
 
@@ -125,17 +126,31 @@ Security issue:  The API credentials are stored in plain text in the json file. 
 
 ## FR#17 - Global Search
 
-Add search icon to the Select Venues page.  This will perform a global search using the same queries as the floor level search does (IP, MAC address, Hostname, Serial).  Provide a progress bar.  Large deployments with many venues and floors means they'll have a lot of devices.  Provide the user feedback as you acquire the data of each device then present the location of the device e.g. Found <hostname> in Venue: <name>, Floor: <name>.  Provide a user a link to jump to the venue/floor and circle the deivce just as if the user searched for that device while on the floor page.  Sync the search box with the floor level if the user clicks on the link to jump to the found location floor page.
+Add search icon to the Select Venues page.  This will perform a global search using the same queries as the floor level search does (IP, MAC address, Hostname, Serial).  Provide a progress bar.  Large deployments with many venues and floors means they'll have a lot of devices.  Provide the user feedback as you acquire the data of each device then present the location of the device e.g. Found < hostname > in Venue: < name >, Floor: < name >.  Provide a user a link to jump to the venue/floor and circle the deivce just as if the user searched for that device while on the floor page.  Sync the search box with the floor level if the user clicks on the link to jump to the found location floor page.
 
-## FR#18 - Move devices on the map
+**Done:** Select Venue header button opens a modal; Search builds a lean session index (1× tenant APs, switches tenant-wide with per-venue fallback, floor plans per venue) with progress/cancel, then matches hostname/serial/MAC/IP. Results show venue/floor and Jump; Jump opens the floor, pulses the device, and syncs the map search box. Index is cached for the login session (Refresh rebuilds; cleared on logout).
 
-This requires API credentials with write access.  Add a edit icon to the floor plan page.  This is to edit the device location on the map.  Allow the use to click and drag the device from its current location to a new location.  Once dropped send the API endpoint call to update Ruckus One cloud.
+## FR#18 - Move device locations on the map
+
+Requires API credentials with write access (Administrator Scope). Add an Edit button on the right side of the floor plan page to edit device locations on the map. Tell the user they must provide credentials with Administrator Scope (rights to send R1 updates). Investigate a way to test whether the user has the correct level of write access to R1 via API. Login page currently notes that Read-Only credentials are recommended — add notes that if Administrator Scope is provided, editing device locations on the map is possible. Update the GitHub README accordingly. Allow the user to click and drag a device icon from its current location to a new location; on release, call the R1 API to update the device coordinates in the cloud. While dragging, remove the device icon and replace it with crosshairs for pinpoint accuracy; once dropped, restore the icon at the new location on the map.
+
+**Done:** Map Edit toggle (Administrator Scope). Probe write access with an invalid-coord PUT on the allowlisted path (403 vs 400/422). Drag AP/switch with crosshairs; drop writes via `PUT .../floorPositions` (AP) or `PUT .../switches/{id}/positions` (switch) only — guarded by `_placementWrite` + typed IPC. Login help + README note Administrator for editing. Esc / leave map cancels drag without write; failed write restores prior coords. Edit mode also shows a right-side **Unplaced Devices** panel (venue APs/switches with no floor placement); drag from the list onto the current floor to place via the same allowlisted PUTs.
 
 ## FR#19 - Map opacity
 
 Come up with controls so that the user can control the map opacity.  1% ~ 100%  Set default at 75%.  Store the user preference so that it's persistent per floor.  Some maps may require 100% while others need default 75% or even lesser at 25%.
 
 **Done:** Bottom-right panel groups opacity slider with font size and zoom. Slider is 1–100% (default 75%); click the `%` label to type a value. Fades only the floor-plan image; AP/switch overlays stay full opacity. Preference persists per floor plan in localStorage. PNG/PDF export uses the same opacity.
+
+## FR#20 - Create a getting started guide
+
+Provide a list of things the user can do and try in a checkbox format.  Add Getting Started to the menu.  Add a new button to the left of Search that looks like a check list.
+
+**Done:** Help → Getting Started and a checklist toolbar button left of map Search open a modal with try-it checkboxes (Edit mode listed above Query PoE & LLDP). Progress persists in localStorage; Reset progress clears checks. Esc / Done / backdrop close like other modals.
+
+## FR#21 - Placeholder
+
+Placeholder
 
 ---
 

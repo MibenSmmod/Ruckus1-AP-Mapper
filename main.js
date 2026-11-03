@@ -11,7 +11,34 @@ const CONFIG_VERSION_ENCRYPTED = 2;
 let mainWindow;
 let ruckusClient = null;
 let poeQueryCancelled = false;
+let globalSearchIndexCancelled = false;
 let darkModeEnabled = true; // matches renderer default; synced from renderer on load
+
+const GLOBAL_SEARCH_SWITCH_CONCURRENCY = 4;
+const GLOBAL_SEARCH_FLOOR_CONCURRENCY = 4;
+
+function sendGlobalSearchProgress(info) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('global-search-progress', info);
+  }
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const list = Array.isArray(items) ? items : [];
+  if (list.length === 0) return [];
+  const results = new Array(list.length);
+  let next = 0;
+  const runnerCount = Math.min(Math.max(1, concurrency), list.length);
+  await Promise.all(Array.from({ length: runnerCount }, async () => {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= list.length) return;
+      results[index] = await worker(list[index], index);
+    }
+  }));
+  return results;
+}
 
 function setDarkModeEnabled(dark) {
   darkModeEnabled = !!dark;
@@ -136,6 +163,14 @@ function createApplicationMenu() {
     {
       role: 'help',
       submenu: [
+        {
+          label: 'Getting Started',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('show-getting-started');
+            }
+          }
+        },
         {
           label: 'Keyboard Shortcuts',
           accelerator: 'CmdOrCtrl+/',
@@ -544,6 +579,190 @@ ipcMain.handle('query-ap-poe', async (event, { venueId, aps }) => {
 
 ipcMain.handle('cancel-ap-poe', async () => {
   poeQueryCancelled = true;
+  return { success: true };
+});
+
+// FR#18: update AP or switch floor-plan coordinates (allowlisted PUTs only).
+// Payload is typed — never accepts raw HTTP method/path from the renderer.
+ipcMain.handle('update-device-position', async (event, params = {}) => {
+  try {
+    if (!ruckusClient) {
+      throw new Error('Not authenticated');
+    }
+    const { type, venueId, floorPlanId, deviceId, xPercent, yPercent } = params;
+    if (type !== 'ap' && type !== 'switch') {
+      throw new Error('type must be "ap" or "switch"');
+    }
+    if (!venueId || !floorPlanId || !deviceId) {
+      throw new Error('venueId, floorPlanId, and deviceId are required');
+    }
+    if (type === 'ap') {
+      await ruckusClient.updateApFloorPosition({
+        venueId,
+        floorPlanId,
+        serialNumber: deviceId,
+        xPercent,
+        yPercent
+      });
+    } else {
+      await ruckusClient.updateSwitchPosition({
+        venueId,
+        switchId: deviceId,
+        floorPlanId,
+        xPercent,
+        yPercent
+      });
+    }
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      statusCode: error.statusCode || null
+    };
+  }
+});
+
+// FR#18: probe whether the token can write floor positions (no coordinate change).
+ipcMain.handle('probe-placement-write-access', async (event, params = {}) => {
+  try {
+    if (!ruckusClient) {
+      throw new Error('Not authenticated');
+    }
+    const { type, venueId, floorPlanId, deviceId } = params;
+    if (type !== 'ap' && type !== 'switch') {
+      throw new Error('type must be "ap" or "switch"');
+    }
+    const result = await ruckusClient.probePlacementWriteAccess({
+      type,
+      venueId,
+      floorPlanId,
+      deviceId
+    });
+    return { success: true, ...result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      statusCode: error.statusCode || null
+    };
+  }
+});
+
+// FR#17: lean tenant device index for Global Search (no radio/clients/PoE)
+ipcMain.handle('build-global-search-index', async (event, { tenantId, venues }) => {
+  try {
+    if (!ruckusClient) {
+      throw new Error('Not authenticated');
+    }
+    globalSearchIndexCancelled = false;
+    const venueList = Array.isArray(venues) ? venues : [];
+    const floorSteps = Math.max(venueList.length, 1);
+    let done = 0;
+    let total = 1 + 1 + floorSteps; // APs + switches + floor plans
+
+    const report = (phase, message) => {
+      const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+      sendGlobalSearchProgress({ percent, phase, message, done, total });
+    };
+
+    const throwIfCancelled = () => {
+      if (globalSearchIndexCancelled) {
+        const err = new Error('Cancelled');
+        err.cancelled = true;
+        throw err;
+      }
+    };
+
+    report('aps', 'Fetching access points...');
+    const accessPoints = await ruckusClient.getAllAccessPoints(tenantId);
+    throwIfCancelled();
+    done += 1;
+    report('aps', `Loaded ${accessPoints.length} access points`);
+
+    let switches = [];
+    report('switches', 'Fetching switches...');
+    try {
+      switches = await ruckusClient.getAllSwitches();
+      throwIfCancelled();
+      done += 1;
+      report('switches', `Loaded ${switches.length} switches`);
+    } catch (error) {
+      if (error.cancelled) throw error;
+      console.warn('[GlobalSearch] Tenant-wide switch query failed, falling back per venue:', error.message);
+      // Replace the single switch step with one step per venue (or one no-op step).
+      const switchSteps = Math.max(venueList.length, 1);
+      total = total - 1 + switchSteps;
+      switches = [];
+      if (venueList.length === 0) {
+        done += 1;
+        report('switches', 'No venues for switch fallback');
+      } else {
+        await mapWithConcurrency(venueList, GLOBAL_SEARCH_SWITCH_CONCURRENCY, async (venue) => {
+          throwIfCancelled();
+          try {
+            const rows = await ruckusClient.getSwitches(venue.id);
+            switches.push(...(rows || []));
+          } catch (venueError) {
+            console.warn(`[GlobalSearch] Switches for venue ${venue.id} failed:`, venueError.message);
+          }
+          done += 1;
+          report('switches', `Switches: ${venue.name || venue.id}`);
+        });
+      }
+    }
+
+    const floorsById = {};
+    report('floors', 'Fetching floor plans...');
+    if (venueList.length === 0) {
+      done += 1;
+      report('floors', 'No venues for floor plans');
+    } else {
+      await mapWithConcurrency(venueList, GLOBAL_SEARCH_FLOOR_CONCURRENCY, async (venue) => {
+        throwIfCancelled();
+        try {
+          const floorPlans = await ruckusClient.getVenueFloorPlans(tenantId, venue.id);
+          const list = Array.isArray(floorPlans) ? floorPlans : [];
+          for (const fp of list) {
+            if (!fp || !fp.id) continue;
+            floorsById[fp.id] = {
+              name: fp.name || 'Unnamed Floor Plan',
+              venueId: venue.id
+            };
+          }
+        } catch (floorError) {
+          console.warn(`[GlobalSearch] Floor plans for venue ${venue.id} failed:`, floorError.message);
+        }
+        done += 1;
+        report('floors', `Floor plans: ${venue.name || venue.id}`);
+      });
+    }
+
+    throwIfCancelled();
+    done = total;
+    report('done', `Index ready · ${accessPoints.length} APs · ${switches.length} switches`);
+
+    return {
+      success: true,
+      data: {
+        accessPoints,
+        switches,
+        floorsById,
+        fetchedAt: Date.now()
+      },
+      cancelled: false
+    };
+  } catch (error) {
+    if (error.cancelled || globalSearchIndexCancelled) {
+      return { success: false, cancelled: true, error: 'Cancelled' };
+    }
+    console.error('[GlobalSearch] Index build failed:', error.message);
+    return { success: false, error: error.message, cancelled: false };
+  }
+});
+
+ipcMain.handle('cancel-global-search-index', async () => {
+  globalSearchIndexCancelled = true;
   return { success: true };
 });
 
