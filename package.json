@@ -12,7 +12,7 @@
     "build:dmg": "npm run prebuild && electron-builder --mac dmg --arm64 --x64",
     "build:win": "npm run prebuild && electron-builder --win --x64",
     "build:all": "npm run prebuild && electron-builder --mac dmg --arm64 --x64 && electron-builder --win --x64",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/ruckus.test.js"
   },
   "keywords": [
     "ruckus",

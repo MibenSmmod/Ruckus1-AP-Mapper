@@ -10,8 +10,14 @@ const CONFIG_VERSION_ENCRYPTED = 2;
 
 let mainWindow;
 let ruckusClient = null;
-let poeQueryCancelled = false;
-let globalSearchIndexCancelled = false;
+// Per-run cancel tokens: starting a run never clears another run's cancel.
+// Cancel stops every active run of that kind.
+const activePoeRuns = new Set();
+const activeGlobalSearchRuns = new Set();
+
+function cancelRuns(runs) {
+  for (const run of runs) run.cancelled = true;
+}
 let darkModeEnabled = true; // matches renderer default; synced from renderer on load
 
 const GLOBAL_SEARCH_SWITCH_CONCURRENCY = 4;
@@ -561,24 +567,28 @@ function sendPoeProgress(info) {
 
 // PoE from RUCKUS One: AP LLDP neighbors plus the matched switch port.
 ipcMain.handle('query-ap-poe', async (event, { venueId, aps }) => {
+  let run = null;
   try {
     if (!ruckusClient) {
       throw new Error('Not authenticated');
     }
-    poeQueryCancelled = false;
+    run = { cancelled: false };
+    activePoeRuns.add(run);
     const data = await ruckusClient.queryApPoe(venueId, aps, {
       onProgress: sendPoeProgress,
-      shouldCancel: () => poeQueryCancelled
+      shouldCancel: () => run.cancelled
     });
-    return { success: true, data, cancelled: poeQueryCancelled };
+    return { success: true, data, cancelled: run.cancelled };
   } catch (error) {
     console.error('[PoE] Query failed:', error.message);
-    return { success: false, error: error.message, cancelled: poeQueryCancelled };
+    return { success: false, error: error.message, cancelled: !!(run && run.cancelled) };
+  } finally {
+    if (run) activePoeRuns.delete(run);
   }
 });
 
 ipcMain.handle('cancel-ap-poe', async () => {
-  poeQueryCancelled = true;
+  cancelRuns(activePoeRuns);
   return { success: true };
 });
 
@@ -654,11 +664,13 @@ ipcMain.handle('probe-placement-write-access', async (event, params = {}) => {
 
 // FR#17: lean tenant device index for Global Search (no radio/clients/PoE)
 ipcMain.handle('build-global-search-index', async (event, { tenantId, venues }) => {
+  let run = null;
   try {
     if (!ruckusClient) {
       throw new Error('Not authenticated');
     }
-    globalSearchIndexCancelled = false;
+    run = { cancelled: false };
+    activeGlobalSearchRuns.add(run);
     const venueList = Array.isArray(venues) ? venues : [];
     const floorSteps = Math.max(venueList.length, 1);
     let done = 0;
@@ -670,7 +682,7 @@ ipcMain.handle('build-global-search-index', async (event, { tenantId, venues }) 
     };
 
     const throwIfCancelled = () => {
-      if (globalSearchIndexCancelled) {
+      if (run.cancelled) {
         const err = new Error('Cancelled');
         err.cancelled = true;
         throw err;
@@ -756,21 +768,25 @@ ipcMain.handle('build-global-search-index', async (event, { tenantId, venues }) 
       cancelled: false
     };
   } catch (error) {
-    if (error.cancelled || globalSearchIndexCancelled) {
+    if (error.cancelled || (run && run.cancelled)) {
       return { success: false, cancelled: true, error: 'Cancelled' };
     }
     console.error('[GlobalSearch] Index build failed:', error.message);
     return { success: false, error: error.message, cancelled: false };
+  } finally {
+    if (run) activeGlobalSearchRuns.delete(run);
   }
 });
 
 ipcMain.handle('cancel-global-search-index', async () => {
-  globalSearchIndexCancelled = true;
+  cancelRuns(activeGlobalSearchRuns);
   return { success: true };
 });
 
 // Logout
 ipcMain.handle('logout', async () => {
+  cancelRuns(activePoeRuns);
+  cancelRuns(activeGlobalSearchRuns);
   ruckusClient = null;
   return { success: true };
 });

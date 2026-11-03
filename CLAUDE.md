@@ -18,6 +18,8 @@ ruckus-one-ap-mapper/
 │   ├── renderer.js         # UI logic, canvas rendering
 │   └── api/
 │       └── ruckus.js       # Ruckus ONE API client
+├── tests/
+│   └── ruckus.test.js      # API client unit tests (stubbed, no network)
 └── config.json             # Encrypted user credentials in userData (gitignored)
 ```
 
@@ -40,7 +42,7 @@ npm run build:dmg         # both Mac DMGs
 npm run build:win         # Windows x64 Setup.exe
 npm run build:all         # all three installers
 
-# Run tests (not yet configured)
+# Unit tests for src/api/ruckus.js (Node built-in runner, no network)
 npm test
 ```
 

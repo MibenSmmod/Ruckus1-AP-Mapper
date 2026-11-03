@@ -55,9 +55,14 @@ class RuckusAPI {
           // Check if response is binary (image)
           const contentType = res.headers['content-type'] || '';
 
-          // Handle redirects as errors for API calls
-          if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
-            reject(new Error(`Authentication failed (HTTP ${res.statusCode}). Please check your Region, Tenant ID, Client ID, and Client Secret.`));
+          // Redirects are never expected from JSON API calls. On the token
+          // endpoint they almost always mean a wrong region or tenant.
+          if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+            const error = String(options.path || '').startsWith('/oauth2/')
+              ? new Error(`Authentication failed (HTTP ${res.statusCode}). Please check your Region, Tenant ID, Client ID, and Client Secret.`)
+              : new Error(`Unexpected redirect (HTTP ${res.statusCode}) from ${options.method} ${options.path}`);
+            error.statusCode = res.statusCode;
+            reject(error);
             return;
           }
 
@@ -87,9 +92,15 @@ class RuckusAPI {
             } catch (e) {
               if (data && data.length < 500) errorMessage += `: ${data}`;
             }
-            reject(new Error(errorMessage));
+            const error = new Error(errorMessage);
+            error.statusCode = res.statusCode;
+            reject(error);
           }
         });
+      });
+
+      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        req.destroy(new Error(`${options.method} ${options.path} timed out`));
       });
 
       req.on('error', (error) => {
@@ -104,38 +115,9 @@ class RuckusAPI {
     });
   }
 
-  // Make binary HTTPS request (for images)
-  _requestBinary(options) {
-    return new Promise((resolve, reject) => {
-      const req = https.request(options, (res) => {
-        const chunks = [];
-
-        res.on('data', (chunk) => {
-          chunks.push(chunk);
-        });
-
-        res.on('end', () => {
-          if (res.statusCode === 429) {
-            reject(rateLimitError());
-            return;
-          }
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            const buffer = Buffer.concat(chunks);
-            const contentType = res.headers['content-type'] || 'image/png';
-            const base64 = buffer.toString('base64');
-            resolve(`data:${contentType};base64,${base64}`);
-          } else {
-            reject(new Error(`HTTP ${res.statusCode}`));
-          }
-        });
-      });
-
-      req.on('error', (error) => {
-        reject(error);
-      });
-
-      req.end();
-    });
+  // _request with the same 429 backoff apiCall uses (1s, 2s, 4s).
+  async _send(options, postData = null) {
+    return withRateLimitRetry(() => this._request(options, postData));
   }
 
   // Check if token needs refresh
@@ -176,9 +158,9 @@ class RuckusAPI {
       }
     };
 
-    const response = await this._request(options, postData);
+    const response = await this._send(options, postData);
 
-    if (!response.access_token) {
+    if (!response || !response.access_token) {
       throw new Error('Authentication failed: No access token received');
     }
 
@@ -206,7 +188,7 @@ class RuckusAPI {
       }
     };
 
-    return await this._request(options);
+    return await this._send(options);
   }
 
   // Get floor plans for a venue
@@ -225,7 +207,7 @@ class RuckusAPI {
       }
     };
 
-    return await this._request(options);
+    return await this._send(options);
   }
 
   // Get floor plan image using imageId from floor plan data
@@ -248,28 +230,26 @@ class RuckusAPI {
     return await this._requestBinaryWithRedirect(options);
   }
 
-  // Make binary request that follows redirects
+  // Make binary request that follows redirects (the file API usually
+  // redirects to cloud storage). TLS is always verified; only https
+  // redirects are followed, and auth headers stay on the original host.
   _requestBinaryWithRedirect(options, maxRedirects = 3) {
     return new Promise((resolve, reject) => {
       const makeRequest = (opts, redirectCount) => {
         const req = https.request(opts, (res) => {
-          // Handle redirect
-          if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) && res.headers.location) {
+          if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+            res.resume();
             if (redirectCount >= maxRedirects) {
               reject(new Error('Too many redirects'));
               return;
             }
-            const redirectUrl = new URL(res.headers.location);
-            const newOpts = {
-              hostname: redirectUrl.hostname,
-              port: 443,
-              path: redirectUrl.pathname + redirectUrl.search,
-              method: 'GET',
-              rejectUnauthorized: false, // Allow cloud storage certs
-              headers: {
-                'Accept': 'image/*'
-              }
-            };
+            let newOpts;
+            try {
+              newOpts = imageRedirectOptions(res.headers.location, opts, options);
+            } catch (error) {
+              reject(error);
+              return;
+            }
             makeRequest(newOpts, redirectCount + 1);
             return;
           }
@@ -287,38 +267,20 @@ class RuckusAPI {
               const base64 = buffer.toString('base64');
               resolve(`data:${contentType};base64,${base64}`);
             } else {
-              reject(new Error(`HTTP ${res.statusCode}`));
+              const error = new Error(`HTTP ${res.statusCode}`);
+              error.statusCode = res.statusCode;
+              reject(error);
             }
           });
+        });
+        req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+          req.destroy(new Error('Floor plan image request timed out'));
         });
         req.on('error', reject);
         req.end();
       };
       makeRequest(options, 0);
     });
-  }
-
-  // Query inventory with custom filter/body
-  async queryInventory(tenantId, body) {
-    await this._ensureAuthenticated();
-
-    const postData = JSON.stringify(body);
-
-    const options = {
-      hostname: this.endpoints.api,
-      port: 443,
-      path: '/tenants/inventories/query',
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.accessToken}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData),
-        'x-rks-tenantid': tenantId
-      }
-    };
-
-    return await this._request(options, postData);
   }
 
   // All tenant APs (placement + identity). No radio/client enrichment.
@@ -337,7 +299,7 @@ class RuckusAPI {
       }
     };
 
-    const allAPs = await this._request(options);
+    const allAPs = await this._send(options);
     return Array.isArray(allAPs) ? allAPs : [];
   }
 
@@ -370,21 +332,7 @@ class RuckusAPI {
       headers
     };
 
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        return await this._requestJson(options, postData);
-      } catch (error) {
-        if (error.statusCode === 429 && attempt < 3) {
-          await delay(2 ** attempt * 1000);
-          continue;
-        }
-        if (error.statusCode === 429) {
-          throw rateLimitError();
-        }
-        throw error;
-      }
-    }
-    return null;
+    return withRateLimitRetry(() => this._requestJson(options, postData));
   }
 
   _requestJson(options, postData = null) {
@@ -420,7 +368,7 @@ class RuckusAPI {
         });
       });
 
-      req.setTimeout(60000, () => {
+      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
         req.destroy(new Error(`${options.method} ${options.path} timed out`));
       });
       req.on('error', reject);
@@ -504,8 +452,16 @@ class RuckusAPI {
       const resp = await this.apiCall('POST', path, body) || {};
       const data = Array.isArray(resp.data) ? resp.data : [];
       rows.push(...data);
-      const total = resp.totalCount != null ? resp.totalCount : rows.length;
-      if (!data.length || rows.length >= total) return rows;
+      if (!data.length) return rows;
+      // Without totalCount, a short page means the last page.
+      const done = resp.totalCount != null
+        ? rows.length >= resp.totalCount
+        : data.length < PAGE_SIZE;
+      if (done) return rows;
+      if (page >= MAX_QUERY_PAGES) {
+        console.warn(`[API] ${path} stopped after ${MAX_QUERY_PAGES} pages (${rows.length} rows)`);
+        return rows;
+      }
       page += 1;
     }
   }
@@ -710,6 +666,9 @@ class RuckusAPI {
 
 const V1_ACCEPT = 'application/vnd.ruckus.v1+json';
 const PAGE_SIZE = 500;
+// Safety stop for queryAll if an endpoint ignores `page` (500 × 200 = 100k rows).
+const MAX_QUERY_PAGES = 200;
+const REQUEST_TIMEOUT_MS = 60000;
 
 // FR#18 allowlist — the only R1 paths permitted for map placement writes.
 const AP_FLOOR_POSITION_PATH =
@@ -737,6 +696,38 @@ const PORT_ID_RE = /(\d+\/\d+\/\d+)/;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Retry HTTP 429 with exponential backoff (1s, 2s, 4s), then surface the
+// user-facing rate-limit message.
+async function withRateLimitRetry(send, retryDelay = delay) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await send();
+    } catch (error) {
+      if (error.statusCode !== 429) throw error;
+      if (attempt >= 3) throw rateLimitError();
+      await retryDelay(2 ** attempt * 1000);
+    }
+  }
+}
+
+// Request options for following a floor-plan image redirect. Only https is
+// allowed. The original headers (Authorization) are kept only when the
+// redirect stays on the original API host.
+function imageRedirectOptions(location, currentOpts, originalOpts) {
+  const url = new URL(location, `https://${currentOpts.hostname}`);
+  if (url.protocol !== 'https:') {
+    throw new Error(`Refusing non-HTTPS floor plan image redirect to ${url.host}`);
+  }
+  const sameHost = url.hostname === originalOpts.hostname;
+  return {
+    hostname: url.hostname,
+    port: url.port ? Number(url.port) : 443,
+    path: url.pathname + url.search,
+    method: 'GET',
+    headers: sameHost ? { ...originalOpts.headers } : { Accept: 'image/*' }
+  };
 }
 
 async function waitWithProgress(ms, shouldCancel, onTick) {
@@ -912,7 +903,7 @@ function wattsFromMw(mw) {
 function formatWatts(mw) {
   const watts = wattsFromMw(mw);
   if (watts == null) return null;
-  return Number.isInteger(watts) ? String(watts) : String(watts);
+  return String(watts);
 }
 
 function standardRank(standard) {
@@ -1141,3 +1132,5 @@ module.exports.indexPorts = indexPorts;
 module.exports.pickPseNeighbor = pickPseNeighbor;
 module.exports.standardRank = standardRank;
 module.exports.wattsFromMw = wattsFromMw;
+module.exports.withRateLimitRetry = withRateLimitRetry;
+module.exports.imageRedirectOptions = imageRedirectOptions;
