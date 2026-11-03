@@ -623,13 +623,14 @@ ipcMain.handle('update-device-position', async (event, params = {}) => {
   }
 });
 
-// FR#18: probe whether the token can write floor positions (no coordinate change).
+// FR#18: probe whether the token can write floor positions by re-writing a
+// placed device's current coordinates (no coordinate change).
 ipcMain.handle('probe-placement-write-access', async (event, params = {}) => {
   try {
     if (!ruckusClient) {
       throw new Error('Not authenticated');
     }
-    const { type, venueId, floorPlanId, deviceId } = params;
+    const { type, venueId, floorPlanId, deviceId, xPercent, yPercent } = params;
     if (type !== 'ap' && type !== 'switch') {
       throw new Error('type must be "ap" or "switch"');
     }
@@ -637,7 +638,9 @@ ipcMain.handle('probe-placement-write-access', async (event, params = {}) => {
       type,
       venueId,
       floorPlanId,
-      deviceId
+      deviceId,
+      xPercent,
+      yPercent
     });
     return { success: true, ...result };
   } catch (error) {

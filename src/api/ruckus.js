@@ -683,35 +683,26 @@ class RuckusAPI {
     return this._placementWrite('PUT', path, { floorPlanId, xPercent, yPercent });
   }
 
-  // Probe write scope without moving the device: invalid coords → 400/422 if
-  // authorized, 403 if Read Only / insufficient scope.
-  async probePlacementWriteAccess({ type, venueId, floorPlanId, deviceId }) {
+  // Probe write scope without moving the device: re-write a device's current
+  // position on this floor (a no-op move). 2xx → writable, 403 → Read Only.
+  // Coordinates must already be valid; they are never clamped, so a bad probe
+  // is refused locally instead of turning into a real move.
+  async probePlacementWriteAccess({ type, venueId, floorPlanId, deviceId, xPercent, yPercent }) {
     if (!venueId || !floorPlanId || !deviceId) {
       throw new Error('venueId, floorPlanId, and deviceId are required to probe write access');
     }
-    let path;
-    let body;
-    if (type === 'switch') {
-      path =
-        `/venues/${encodeURIComponent(venueId)}` +
-        `/switches/${encodeURIComponent(deviceId)}/positions`;
-      body = { floorPlanId, xPercent: -1, yPercent: 0 };
-    } else {
-      path =
-        `/venues/${encodeURIComponent(venueId)}` +
-        `/floorplans/${encodeURIComponent(floorPlanId)}` +
-        `/aps/${encodeURIComponent(deviceId)}/floorPositions`;
-      body = { xPercent: -1, yPercent: 0 };
+    if (!isValidPercent(xPercent) || !isValidPercent(yPercent)) {
+      throw new Error('Probe refused: the device\'s current xPercent/yPercent (0–100) are required');
     }
-    this._assertPlacementWritePath('PUT', path);
     try {
-      await this.apiCall('PUT', path, body);
-      // Unexpected success with invalid coords — still treat as writable.
+      if (type === 'switch') {
+        await this.updateSwitchPosition({ venueId, switchId: deviceId, floorPlanId, xPercent, yPercent });
+      } else {
+        await this.updateApFloorPosition({ venueId, floorPlanId, serialNumber: deviceId, xPercent, yPercent });
+      }
       return { canWrite: true };
     } catch (error) {
-      const status = error.statusCode;
-      if (status === 403) return { canWrite: false, statusCode: 403 };
-      if (status === 400 || status === 422) return { canWrite: true, statusCode: status };
+      if (error.statusCode === 403) return { canWrite: false, statusCode: 403 };
       throw error;
     }
   }
@@ -732,6 +723,10 @@ function clampPercent(value) {
     throw new Error('Placement write refused: xPercent/yPercent must be a number');
   }
   return Math.min(100, Math.max(0, n));
+}
+
+function isValidPercent(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
 }
 const PORT_FIELDS = [
   'switchName', 'switchSerial', 'switchUnitId', 'portIdentifier', 'name',

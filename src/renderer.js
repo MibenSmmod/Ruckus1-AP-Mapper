@@ -88,7 +88,7 @@ const state = {
   editBannerDismissed: false, // hide tip for this edit session only
   unplacedPanelDismissed: false, // hide unplaced panel for this edit session only
   unplacedSearchQuery: '',
-  canWritePositions: null, // null = unprobed, true/false after probe
+  canWritePositions: null, // null = unverified (probe or first move decides), true/false after
   deviceDrag: null // active drag incl. source 'map'|'unplaced'
 };
 
@@ -3795,7 +3795,7 @@ function handleCanvasMouseDown(e) {
   const mouseY = e.clientY - rect.top;
 
   const hit = getDeviceAtPoint(mouseX, mouseY);
-  if (state.editMode && hit && state.canWritePositions) {
+  if (state.editMode && hit && state.canWritePositions !== false) {
     beginDeviceDrag(hit, mouseX, mouseY, e.clientX, e.clientY);
     return;
   }
@@ -4098,24 +4098,32 @@ async function toggleEditMode() {
   }
 }
 
+function probePercent(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
+}
+
+// The probe re-writes a device's current position, so only devices already
+// placed on this floor with valid coordinates qualify (never unplaced ones).
 function pickProbeDevice() {
-  const ap = getVisibleAccessPoints().find(
-    (a) => a.serialNumber && a.position && a.position.floorplanId
-  );
-  if (ap) {
-    return { type: 'ap', deviceId: ap.serialNumber };
-  }
-  const sw = getVisibleSwitches().find((s) => s.id && s.floorplanId);
-  if (sw) {
-    return { type: 'switch', deviceId: sw.id };
-  }
-  const unplaced = getUnplacedVenueDevices();
-  for (const entry of unplaced) {
-    if (entry.type === 'ap' && entry.device.serialNumber) {
-      return { type: 'ap', deviceId: entry.device.serialNumber };
+  const floorPlanId = state.selectedFloorPlan && state.selectedFloorPlan.id;
+  if (!floorPlanId) return null;
+  for (const ap of state.accessPoints) {
+    const pos = ap.position;
+    if (!ap.serialNumber || !pos || pos.floorplanId !== floorPlanId) continue;
+    const xPercent = probePercent(pos.xPercent);
+    const yPercent = probePercent(pos.yPercent);
+    if (xPercent != null && yPercent != null) {
+      return { type: 'ap', deviceId: ap.serialNumber, xPercent, yPercent };
     }
-    if (entry.type === 'switch' && entry.device.id) {
-      return { type: 'switch', deviceId: entry.device.id };
+  }
+  for (const sw of state.switches) {
+    if (!sw.id || sw.floorplanId !== floorPlanId) continue;
+    const xPercent = probePercent(sw.xPercent);
+    const yPercent = probePercent(sw.yPercent);
+    if (xPercent != null && yPercent != null) {
+      return { type: 'switch', deviceId: sw.id, xPercent, yPercent };
     }
   }
   return null;
@@ -4130,15 +4138,18 @@ async function ensurePlacementWriteAccess() {
 
   const probeTarget = pickProbeDevice();
   if (!probeTarget) {
-    alert('No devices available to verify write access. Ensure this venue has at least one AP or switch.');
-    return false;
+    // Nothing placed on this floor to re-write safely. Allow edit mode
+    // unverified; the first real move confirms access (403 rolls back).
+    return true;
   }
 
   const result = await window.api.probePlacementWriteAccess({
     type: probeTarget.type,
     venueId: state.selectedVenue.id,
     floorPlanId: state.selectedFloorPlan.id,
-    deviceId: probeTarget.deviceId
+    deviceId: probeTarget.deviceId,
+    xPercent: probeTarget.xPercent,
+    yPercent: probeTarget.yPercent
   });
 
   if (!result.success) {
@@ -4203,7 +4214,7 @@ function beginDeviceDrag(hit, mouseX, mouseY, clientX, clientY, source = 'map') 
 }
 
 function handleUnplacedListMouseDown(e) {
-  if (!state.editMode || !state.canWritePositions) return;
+  if (!state.editMode || state.canWritePositions === false) return;
   const row = e.target.closest('.unplaced-device-row');
   if (!row) return;
   e.preventDefault();
@@ -4380,7 +4391,9 @@ async function finishDeviceDrag() {
     yPercent: pct.yPercent
   });
 
-  if (!result.success) {
+  if (result.success) {
+    state.canWritePositions = true;
+  } else {
     if (fromUnplaced) {
       clearLocalDevicePlacement(drag.type, drag.device);
     } else {
