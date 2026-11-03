@@ -349,7 +349,9 @@ function isPlaintextCredentials(stored) {
 
 function writeEncryptedCredentials(credentials) {
   const encryptedConfig = encryptCredentials(credentials);
-  fs.writeFileSync(configPath, JSON.stringify(encryptedConfig, null, 2));
+  // Owner-only: the payload is Keychain/DPAPI-bound, but keep it unreadable to other users too.
+  fs.writeFileSync(configPath, JSON.stringify(encryptedConfig, null, 2), { mode: 0o600 });
+  fs.chmodSync(configPath, 0o600);
 }
 
 function loadStoredCredentials() {

@@ -268,3 +268,13 @@ test('region must be na, eu or asia', () => {
   assert.strictEqual(new RuckusAPI('EU').endpoints.api, 'api.eu.ruckus.cloud');
   assert.throws(() => new RuckusAPI('mars'), /Invalid region/);
 });
+
+test('network failures get a plain-language message; other errors pass through', () => {
+  const offline = Object.assign(new Error('getaddrinfo ENOTFOUND api.ruckus.cloud'), { code: 'ENOTFOUND' });
+  const friendly = RuckusAPI.friendlyNetworkError(offline, 'api.ruckus.cloud');
+  assert.match(friendly.message, /Cannot reach api\.ruckus\.cloud \(ENOTFOUND\)\. Check your network connection/);
+  assert.strictEqual(friendly.code, 'ENOTFOUND');
+
+  const other = httpError(401);
+  assert.strictEqual(RuckusAPI.friendlyNetworkError(other, 'api.ruckus.cloud'), other);
+});

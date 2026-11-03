@@ -1546,6 +1546,7 @@ async function handleLogin(e) {
       });
       if (!saved) {
         console.error('Failed to save credentials securely. Sign-in will continue without persisted credentials.');
+        alert('Signed in, but your credentials could not be saved securely on this computer. You will need to enter them again next time.');
       }
     } else {
       await window.api.clearCredentials();
@@ -1601,6 +1602,11 @@ async function handleLogout() {
   updateVenueDeviceTotals();
   if (elements.venueToolbar) elements.venueToolbar.classList.add('hidden');
   if (elements.venuePagination) elements.venuePagination.classList.add('hidden');
+  // Don't leave an unsaved secret sitting in the login form after logout.
+  setClientSecretVisibility(false);
+  if (!elements.saveCredentials.checked) {
+    elements.clientSecret.value = '';
+  }
   showScreen('login');
 }
 

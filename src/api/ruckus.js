@@ -104,7 +104,7 @@ class RuckusAPI {
       });
 
       req.on('error', (error) => {
-        reject(error);
+        reject(friendlyNetworkError(error, options.hostname));
       });
 
       if (postData) {
@@ -276,7 +276,7 @@ class RuckusAPI {
         req.setTimeout(REQUEST_TIMEOUT_MS, () => {
           req.destroy(new Error('Floor plan image request timed out'));
         });
-        req.on('error', reject);
+        req.on('error', (error) => reject(friendlyNetworkError(error, opts.hostname)));
         req.end();
       };
       makeRequest(options, 0);
@@ -371,7 +371,7 @@ class RuckusAPI {
       req.setTimeout(REQUEST_TIMEOUT_MS, () => {
         req.destroy(new Error(`${options.method} ${options.path} timed out`));
       });
-      req.on('error', reject);
+      req.on('error', (error) => reject(friendlyNetworkError(error, options.hostname)));
       if (postData) req.write(postData);
       req.end();
     });
@@ -710,6 +710,21 @@ async function withRateLimitRetry(send, retryDelay = delay) {
       await retryDelay(2 ** attempt * 1000);
     }
   }
+}
+
+// Plain-language error for DNS / connection failures (offline, wrong network,
+// VPN/proxy). Other errors pass through unchanged.
+const NETWORK_ERROR_CODES = new Set([
+  'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH'
+]);
+
+function friendlyNetworkError(error, hostname) {
+  if (!error || !NETWORK_ERROR_CODES.has(error.code)) return error;
+  const friendly = new Error(
+    `Cannot reach ${hostname} (${error.code}). Check your network connection and the selected Region.`
+  );
+  friendly.code = error.code;
+  return friendly;
 }
 
 // Request options for following a floor-plan image redirect. Only https is
@@ -1134,3 +1149,4 @@ module.exports.standardRank = standardRank;
 module.exports.wattsFromMw = wattsFromMw;
 module.exports.withRateLimitRetry = withRateLimitRetry;
 module.exports.imageRedirectOptions = imageRedirectOptions;
+module.exports.friendlyNetworkError = friendlyNetworkError;

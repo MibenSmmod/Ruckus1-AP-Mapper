@@ -120,17 +120,18 @@ npm start
 - [ ] Valid credentials → Connect → venues screen
 - [ ] Save credentials checked → quit → relaunch → fields restored, still connects
 - [ ] Clear button empties fields; after clear + quit with save off, no leftover secrets on next launch
-- [ ] Uncheck save / logout → saved credentials cleared from disk
+- [ ] Connect with Save **unchecked** → saved credentials removed from disk (`config.json` gone)
+- [ ] Logout with Save **checked** → fields stay filled (saved login); with Save **unchecked** → Client Secret field is emptied and hidden
 
 ### UI — negative / edge
 - [ ] Wrong secret → clear error, stay on login, no crash
 - [ ] Wrong region for the tenant → clear auth error (not a hang)
 - [ ] Empty required fields → blocked by form validation
-- [ ] Network offline → graceful error within ~60s, Connect usable again
+- [ ] Network offline → "Cannot reach api…ruckus.cloud … Check your network connection and the selected Region" within ~60s; Connect usable again
 - [ ] Rapid double-click Connect → no duplicate auth storms or stuck spinner
 
 ### Backend
-- [ ] Saved `config.json` contains only `version`, `region`, `encryptedPayload` — no readable Tenant ID / Client ID / Secret
+- [ ] Saved `config.json` contains only `version`, `region`, `encryptedPayload` — no readable Tenant ID / Client ID / Secret — and is owner-only (`-rw-------`)
 - [ ] Corrupt `config.json` (edit one character of `encryptedPayload`) → app opens with an empty login; terminal logs the error; no crash
 - [ ] Legacy plaintext migration: a `config.json` with plain `tenantId`/`clientId`/`clientSecret` loads once and is rewritten encrypted
 - [ ] The client secret never appears in terminal output or the DevTools console, including on failed login
