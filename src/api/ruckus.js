@@ -100,7 +100,7 @@ class RuckusAPI {
       });
 
       req.setTimeout(REQUEST_TIMEOUT_MS, () => {
-        req.destroy(new Error(`${options.method} ${options.path} timed out`));
+        req.destroy(timeoutError());
       });
 
       req.on('error', (error) => {
@@ -279,7 +279,7 @@ class RuckusAPI {
           });
         });
         req.setTimeout(REQUEST_TIMEOUT_MS, () => {
-          req.destroy(new Error('Floor plan image request timed out'));
+          req.destroy(timeoutError());
         });
         req.on('error', (error) => reject(friendlyNetworkError(error, opts.hostname)));
         req.end();
@@ -374,7 +374,7 @@ class RuckusAPI {
       });
 
       req.setTimeout(REQUEST_TIMEOUT_MS, () => {
-        req.destroy(new Error(`${options.method} ${options.path} timed out`));
+        req.destroy(timeoutError());
       });
       req.on('error', (error) => reject(friendlyNetworkError(error, options.hostname)));
       if (postData) req.write(postData);
@@ -722,6 +722,12 @@ async function withRateLimitRetry(send, retryDelay = delay) {
 const NETWORK_ERROR_CODES = new Set([
   'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH'
 ]);
+
+// Timeouts are reported like other network failures, without the request
+// path (which can include the Tenant ID).
+function timeoutError() {
+  return Object.assign(new Error('Request timed out'), { code: 'ETIMEDOUT' });
+}
 
 function friendlyNetworkError(error, hostname) {
   if (!error || !NETWORK_ERROR_CODES.has(error.code)) return error;

@@ -298,3 +298,28 @@ test('sign-in HTTP errors become actionable messages', async () => {
   client._send = async () => { throw httpError(401); };
   await assert.rejects(client.authenticate('t', 'c', 's'), /did not accept this Client ID/);
 });
+
+test('a timed-out request reports the host, not the path', async () => {
+  const https = require('node:https');
+  const { EventEmitter } = require('node:events');
+  const original = https.request;
+  https.request = () => {
+    const req = new EventEmitter();
+    req.setTimeout = (_ms, onTimeout) => setImmediate(onTimeout);
+    req.destroy = (err) => setImmediate(() => req.emit('error', err));
+    req.write = () => {};
+    req.end = () => {};
+    return req;
+  };
+  try {
+    const client = new RuckusAPI('na');
+    const options = { hostname: 'api.ruckus.cloud', path: '/oauth2/token/secret-tenant', method: 'POST', headers: {} };
+    await assert.rejects(client._request(options, 'x'), (err) => {
+      assert.match(err.message, /^Cannot reach api\.ruckus\.cloud \(ETIMEDOUT\)/);
+      assert.doesNotMatch(err.message, /secret-tenant/);
+      return true;
+    });
+  } finally {
+    https.request = original;
+  }
+});
