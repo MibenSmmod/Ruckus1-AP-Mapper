@@ -124,7 +124,7 @@ npm start
 - [ ] Logout with Save **checked** → fields stay filled (saved login); with Save **unchecked** → Client Secret field is emptied and hidden
 
 ### UI — negative / edge
-- [ ] Wrong secret → clear error, stay on login, no crash
+- [ ] Wrong secret → "Sign-in failed: RUCKUS One did not accept this Client ID and Client Secret… (HTTP 401)", stay on login, no crash
 - [ ] Wrong region for the tenant → clear auth error (not a hang)
 - [ ] Empty required fields → blocked by form validation
 - [ ] Network offline → "Cannot reach api…ruckus.cloud … Check your network connection and the selected Region" within ~60s; Connect usable again

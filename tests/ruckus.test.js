@@ -278,3 +278,23 @@ test('network failures get a plain-language message; other errors pass through',
   const other = httpError(401);
   assert.strictEqual(RuckusAPI.friendlyNetworkError(other, 'api.ruckus.cloud'), other);
 });
+
+test('sign-in HTTP errors become actionable messages', async () => {
+  const msg = (status) => RuckusAPI.authFailureError(httpError(status)).message;
+  assert.match(msg(401), /did not accept this Client ID and Client Secret.*\(HTTP 401\)$/);
+  assert.match(msg(400), /Client ID and Client Secret/);
+  assert.match(msg(403), /not allowed to access this tenant/);
+  assert.match(msg(404), /no tenant with this Tenant ID .* Region/);
+  assert.match(msg(503), /try again/);
+  assert.strictEqual(RuckusAPI.authFailureError(httpError(401)).statusCode, 401);
+
+  const offline = Object.assign(new Error('Cannot reach x'), { code: 'ENOTFOUND' });
+  assert.strictEqual(RuckusAPI.authFailureError(offline), offline);
+  const limited = httpError(429);
+  assert.strictEqual(RuckusAPI.authFailureError(limited), limited);
+
+  // authenticate() applies it to the token request.
+  const client = new RuckusAPI('na');
+  client._send = async () => { throw httpError(401); };
+  await assert.rejects(client.authenticate('t', 'c', 's'), /did not accept this Client ID/);
+});

@@ -158,7 +158,12 @@ class RuckusAPI {
       }
     };
 
-    const response = await this._send(options, postData);
+    let response;
+    try {
+      response = await this._send(options, postData);
+    } catch (error) {
+      throw authFailureError(error);
+    }
 
     if (!response || !response.access_token) {
       throw new Error('Authentication failed: No access token received');
@@ -727,6 +732,32 @@ function friendlyNetworkError(error, hostname) {
   return friendly;
 }
 
+// Turn an HTTP error from the OAuth token endpoint into a message a user can
+// act on. Network errors, timeouts and rate limits keep their own messages.
+function authFailureError(error) {
+  const status = error && error.statusCode;
+  if (!status || status === 429) return error;
+  let message;
+  if (status === 400 || status === 401) {
+    message = 'Sign-in failed: RUCKUS One did not accept this Client ID and Client Secret. ' +
+      'Copy both again from the Application Token in RUCKUS One, and check that the Tenant ID and Region belong to the same account.';
+  } else if (status === 403) {
+    message = 'Sign-in refused: the Application Token is not allowed to access this tenant. ' +
+      'Check the Tenant ID, and that the token has not been revoked or disabled.';
+  } else if (status === 404) {
+    message = 'Sign-in failed: no tenant with this Tenant ID was found in the selected Region. Check the Tenant ID and Region.';
+  } else if ([301, 302, 303, 307, 308].includes(status)) {
+    message = 'Sign-in failed: RUCKUS One redirected the request, which usually means the wrong Region or Tenant ID.';
+  } else if (status >= 500) {
+    message = 'RUCKUS One sign-in is not responding correctly right now. Wait a minute and try again.';
+  } else {
+    message = 'Sign-in failed. Check your Region, Tenant ID, Client ID, and Client Secret.';
+  }
+  const friendly = new Error(`${message} (HTTP ${status})`);
+  friendly.statusCode = status;
+  return friendly;
+}
+
 // Request options for following a floor-plan image redirect. Only https is
 // allowed. The original headers (Authorization) are kept only when the
 // redirect stays on the original API host.
@@ -1150,3 +1181,4 @@ module.exports.wattsFromMw = wattsFromMw;
 module.exports.withRateLimitRetry = withRateLimitRetry;
 module.exports.imageRedirectOptions = imageRedirectOptions;
 module.exports.friendlyNetworkError = friendlyNetworkError;
+module.exports.authFailureError = authFailureError;
