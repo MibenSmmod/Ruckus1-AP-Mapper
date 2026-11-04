@@ -54,6 +54,7 @@ const state = {
   selectedSearchDevice: null, // { type: 'ap'|'switch', device }
   searchKeyboardIndex: -1, // keyboard highlight in search dropdown (FR#11)
   // FR#17 Global Search
+  floorPlanListLoadId: 0, // newest loadFloorPlans call; older responses are ignored
   globalSearchIndex: null, // { accessPoints, switches, floorsById, fetchedAt }
   globalSearchHits: [], // matched hits for modal list
   globalSearchBuilding: false,
@@ -1990,11 +1991,16 @@ async function loadFloorPlans() {
   elements.floorplanList.classList.add('hidden');
   elements.floorplanError.classList.add('hidden');
 
+  const venueId = state.selectedVenue.id;
+  // Only the newest load may update the list (fast Back / other venue).
+  const loadId = ++state.floorPlanListLoadId;
+  const isCurrent = () => loadId === state.floorPlanListLoadId && state.selectedVenue?.id === venueId;
   try {
     const result = await window.api.getFloorPlans({
       tenantId: state.tenantId,
-      venueId: state.selectedVenue.id
+      venueId
     });
+    if (!isCurrent()) return;
 
     if (!result.success) {
       throw new Error(result.error || 'Failed to load floor plans');
@@ -2007,10 +2013,11 @@ async function loadFloorPlans() {
     renderFloorPlanList();
 
   } catch (error) {
+    if (!isCurrent()) return;
     elements.floorplanError.textContent = error.message;
     elements.floorplanError.classList.remove('hidden');
   } finally {
-    elements.floorplanLoading.classList.add('hidden');
+    if (isCurrent()) elements.floorplanLoading.classList.add('hidden');
   }
 }
 
@@ -2175,11 +2182,17 @@ function formatVenueDeviceTotals(counts) {
   return `${ap} Access Points · ${sw} Switches`;
 }
 
-function updateVenueDeviceTotals({ loading = false } = {}) {
+function updateVenueDeviceTotals({ loading = false, error = null } = {}) {
   const el = elements.venueDeviceTotals;
   if (!el) return;
   const hasCounts = Boolean(state.venueDevices.fetchedAt);
-  el.textContent = hasCounts ? formatVenueDeviceTotals(state.venueDeviceCounts) : '—';
+  if (error) {
+    el.textContent = 'Device totals unavailable';
+    el.title = error;
+  } else {
+    el.textContent = hasCounts ? formatVenueDeviceTotals(state.venueDeviceCounts) : '—';
+    el.removeAttribute('title');
+  }
   el.classList.toggle('is-loading', loading && !hasCounts);
 }
 
@@ -2194,20 +2207,31 @@ async function ensureVenueDevices({ force = false } = {}) {
 
   updateVenueDeviceTotals({ loading: true });
 
+  const venueId = state.selectedVenue.id;
   const [apResult, switchResult] = await Promise.all([
     window.api.getAccessPoints({
       tenantId: state.tenantId,
-      venueId: state.selectedVenue.id
-    }),
+      venueId
+    }).catch((error) => ({ success: false, error: error.message || String(error) })),
     window.api.getSwitches({
-      venueId: state.selectedVenue.id
+      venueId
     }).catch((error) => {
       console.warn('[Switches] Query failed:', error.message || error);
       return { success: false, error: error.message || String(error) };
     })
   ]);
 
-  const accessPoints = apResult.success ? (apResult.data || []) : [];
+  // The user moved to another venue while this was loading.
+  if (state.selectedVenue?.id !== venueId) return { success: false, stale: true };
+
+  if (!apResult.success) {
+    console.warn('[Venue devices] Access point query failed:', apResult.error || 'Unknown error');
+    clearVenueDevices();
+    updateVenueDeviceTotals({ error: apResult.error || 'Could not load access points' });
+    return { success: false };
+  }
+
+  const accessPoints = apResult.data || [];
   let switches = [];
   if (switchResult.success) {
     switches = switchResult.data || [];
