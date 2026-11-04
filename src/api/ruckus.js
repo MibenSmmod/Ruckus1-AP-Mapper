@@ -499,6 +499,9 @@ class RuckusAPI {
     if (shouldCancel()) return poeResultsForAps(list, {}, portIndex);
 
     const neighborsBySerial = {};
+    // APs whose firmware can't refresh LLDP on request (WIFI-10496). Their
+    // last reported neighbors are still read below.
+    const refreshUnsupported = new Set();
     if (refresh && operational.length && !shouldCancel()) {
       for (let i = 0; i < operational.length; i++) {
         if (shouldCancel()) break;
@@ -516,7 +519,12 @@ class RuckusAPI {
             { status: 'CURRENT', type: 'LLDP_NEIGHBOR' }
           );
         } catch (error) {
-          console.warn(`[PoE] LLDP refresh failed for ${ap.name || ap.serialNumber}:`, error.message);
+          if (isFirmwareUnsupportedError(error)) {
+            refreshUnsupported.add(ap.serialNumber);
+            console.warn(`[PoE] ${ap.name || ap.serialNumber}: AP firmware does not support an LLDP refresh (WIFI-10496); using its last reported LLDP neighbors.`);
+          } else {
+            console.warn(`[PoE] LLDP refresh failed for ${ap.name || ap.serialNumber}:`, error.message);
+          }
         }
       }
 
@@ -529,7 +537,7 @@ class RuckusAPI {
             `${remaining}s remaining`
           );
         });
-        if (!finished) return poeResultsForAps(list, neighborsBySerial, portIndex);
+        if (!finished) return poeResultsForAps(list, neighborsBySerial, portIndex, { refreshUnsupported });
       }
     }
 
@@ -560,7 +568,7 @@ class RuckusAPI {
     }
 
     report(100, 'Complete', '');
-    return poeResultsForAps(list, neighborsBySerial, portIndex);
+    return poeResultsForAps(list, neighborsBySerial, portIndex, { refreshUnsupported });
   }
 
   // --- FR#18: floor-plan placement writes (allowlisted PUT only) ---
@@ -1074,21 +1082,28 @@ function formatPoeLabel(lldp, port) {
   return negotiated || null;
 }
 
-function labelForAp(ap, neighbors, port) {
+// WIFI-10496: the AP's firmware doesn't support the requested operation.
+function isFirmwareUnsupportedError(error) {
+  return /WIFI-10496|firmware is not supported/i.test(String(error && error.message || ''));
+}
+
+function labelForAp(ap, neighbors, port, { refreshUnsupported = false } = {}) {
   const lldp = pickPseNeighbor(neighbors);
   const text = formatPoeLabel(lldp, port);
   if (text) return text;
   if (!isOperational(ap)) return 'error:Offline';
   if (port && isExplicitlyFalse(port.poeEnabled)) return 'error:PoE disabled';
-  if (!neighbors || !neighbors.length) return 'error:No LLDP';
+  if (!neighbors || !neighbors.length) {
+    return refreshUnsupported ? 'error:No LLDP (AP firmware)' : 'error:No LLDP';
+  }
   return 'error:No PoE data';
 }
 
 // Structured PoE row for rollups (FR#4). Map labels stay in `label`.
-function detailForAp(ap, neighbors, port) {
+function detailForAp(ap, neighbors, port, { refreshUnsupported = false } = {}) {
   const mac = String(ap.mac || ap.macAddress || '').toLowerCase();
   const lldp = pickPseNeighbor(neighbors);
-  const label = labelForAp(ap, neighbors, port);
+  const label = labelForAp(ap, neighbors, port, { refreshUnsupported });
   const operational = isOperational(ap);
 
   let status = 'ok';
@@ -1096,7 +1111,7 @@ function detailForAp(ap, neighbors, port) {
     const err = label.slice(6);
     if (err === 'Offline') status = 'offline';
     else if (err === 'PoE disabled') status = 'poe_disabled';
-    else if (err === 'No LLDP') status = 'no_lldp';
+    else if (err.startsWith('No LLDP')) status = 'no_lldp';
     else status = 'no_data';
   }
 
@@ -1133,6 +1148,7 @@ function detailForAp(ap, neighbors, port) {
     status,
     underpowered,
     label,
+    lldpRefreshUnsupported: refreshUnsupported,
     standard: negotiatedStandard || null,
     class: cls,
     allocW: wattsFromMw(lldp && lldp.lldpPSEAllocPowerVal),
@@ -1150,7 +1166,7 @@ function detailForAp(ap, neighbors, port) {
   };
 }
 
-function poeResultsForAps(aps, neighborsBySerial, portIndex) {
+function poeResultsForAps(aps, neighborsBySerial, portIndex, { refreshUnsupported = new Set() } = {}) {
   const labels = {};
   const details = {};
   for (const ap of aps) {
@@ -1159,7 +1175,9 @@ function poeResultsForAps(aps, neighborsBySerial, portIndex) {
     const neighbors = neighborsBySerial[ap.serialNumber] || [];
     const lldp = pickPseNeighbor(neighbors);
     const port = findPort(ap, lldp, portIndex);
-    const detail = detailForAp(ap, neighbors, port);
+    const detail = detailForAp(ap, neighbors, port, {
+      refreshUnsupported: refreshUnsupported.has(ap.serialNumber)
+    });
     labels[mac] = detail.label;
     details[mac] = detail;
   }
@@ -1188,3 +1206,4 @@ module.exports.withRateLimitRetry = withRateLimitRetry;
 module.exports.imageRedirectOptions = imageRedirectOptions;
 module.exports.friendlyNetworkError = friendlyNetworkError;
 module.exports.authFailureError = authFailureError;
+module.exports.isFirmwareUnsupportedError = isFirmwareUnsupportedError;

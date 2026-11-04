@@ -5521,7 +5521,7 @@ function isPoeIssueDetail(detail) {
 
 function poeIssueLabel(detail) {
   if (!detail) return 'Issue';
-  if (detail.status === 'no_lldp') return 'No LLDP';
+  if (detail.status === 'no_lldp') return detail.lldpRefreshUnsupported ? 'No LLDP (AP firmware)' : 'No LLDP';
   if (detail.status === 'poe_disabled') return 'PoE disabled';
   if (detail.status === 'underpowered' || detail.underpowered) return 'Underpowered';
   if (detail.status === 'no_data') return 'No PoE data';

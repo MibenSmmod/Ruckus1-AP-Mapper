@@ -323,3 +323,36 @@ test('a timed-out request reports the host, not the path', async () => {
     https.request = original;
   }
 });
+
+test('AP firmware without LLDP refresh (WIFI-10496): query continues and the label says why', async () => {
+  const client = new RuckusAPI('na');
+  const firmwareError = new Error('PATCH ... -> HTTP 400: {"errors":[{"code":"WIFI-10496","message":"The version of AP firmware is not supported."}]}');
+  firmwareError.statusCode = 400;
+  const calls = [];
+  client.apiCall = async (method, path) => {
+    calls.push(`${method} ${path}`);
+    if (path.endsWith('/switchPorts/query')) return { data: [], totalCount: 0 };
+    if (method === 'PATCH') throw firmwareError;
+    const noNeighbors = new Error('WIFI-10498 No detected neighbor data');
+    throw noNeighbors;
+  };
+  const ap = { name: 'MCS-AP1', serialNumber: 'S1', macAddress: 'AA:BB:CC:00:00:01', status: '2_00_Operational' };
+  const warn = console.warn;
+  console.warn = () => {};
+  let result;
+  try {
+    result = await client.queryApPoe('v1', [ap], { waitMs: 0 });
+  } finally {
+    console.warn = warn;
+  }
+  // Refresh was attempted, and the neighbors were still read.
+  assert.ok(calls.some((c) => c.startsWith('PATCH ')));
+  assert.ok(calls.some((c) => c.endsWith('/neighbors/query')));
+  const detail = result.details['aa:bb:cc:00:00:01'];
+  assert.strictEqual(detail.label, 'error:No LLDP (AP firmware)');
+  assert.strictEqual(detail.status, 'no_lldp');
+  assert.strictEqual(detail.lldpRefreshUnsupported, true);
+
+  assert.ok(RuckusAPI.isFirmwareUnsupportedError(firmwareError));
+  assert.ok(!RuckusAPI.isFirmwareUnsupportedError(httpError(400)));
+});
