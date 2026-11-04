@@ -876,6 +876,7 @@ function setupEventListeners() {
 
     // Close popup before showing the PoE query confirmation
     elements.apPopup.classList.add('hidden');
+    if (warnIfNoOnlineAps([ap])) return;
 
     const confirmed = await confirmPoeQuery();
     if (!confirmed) return;
@@ -1225,6 +1226,7 @@ function setupEventListeners() {
 
   elements.queryAgainBtn.addEventListener('click', async () => {
     elements.poeCacheChoiceModal.classList.add('hidden');
+    if (warnIfNoOnlineAps(state.accessPoints)) return;
     const confirmed = await confirmPoeQuery();
     if (confirmed) {
       const ok = await fetchPoEInfo();
@@ -5694,10 +5696,29 @@ function showPoECacheChoiceModal() {
   elements.poeCacheChoiceModal.classList.remove('hidden');
 }
 
+// Same rule as isOperational() in src/api/ruckus.js: RUCKUS One only
+// refreshes and reports LLDP for APs that are online.
+function apIsOperational(ap) {
+  const status = String(ap?.state || ap?.status || ap?.subState || '');
+  return status.startsWith('2_') || /operational|online/i.test(status);
+}
+
+// When none of these APs is online there is nothing to query: say so
+// instead of running a query that finishes instantly with no visible change.
+function warnIfNoOnlineAps(aps) {
+  const list = aps || [];
+  if (list.some(apIsOperational)) return false;
+  const count = list.length;
+  const what = count === 1 ? 'This AP is offline' : `All ${count} APs here are offline`;
+  alert(`${what}, so there is no PoE or LLDP data to read. RUCKUS One reports LLDP only for online APs. Try again when ${count === 1 ? 'it is' : 'they are'} back online.`);
+  return true;
+}
+
 // Start floor-plan PoE query from the PoE icon (cache choice or confirm dialog)
 async function startFloorPlanPoeQuery() {
   if (state.poeQueryInProgress) return;
   if (!state.selectedFloorPlan) return;
+  if (warnIfNoOnlineAps(state.accessPoints)) return;
 
   if (hasPoeCacheForFloor(state.selectedFloorPlan.id)) {
     showPoECacheChoiceModal();
@@ -5828,15 +5849,21 @@ async function runPoeQuery(aps, { replaceAll }) {
     savePoeCache();
     console.log('[PoE] Loaded', Object.keys(labels).length, 'AP labels,', Object.keys(details).length, 'details');
 
+    // Say what was covered, so a floor with offline APs isn't a mystery.
+    const online = aps.filter(apIsOperational).length;
+    const offline = aps.length - online;
     elements.progressFill.style.width = '100%';
     elements.progressText.textContent = result.cancelled ? 'Cancelled' : 'Complete';
-    elements.currentApText.textContent = '';
+    elements.currentApText.textContent = result.cancelled
+      ? ''
+      : `Read ${online} online AP${online === 1 ? '' : 's'}` +
+        (offline ? ` · ${offline} offline AP${offline === 1 ? '' : 's'} skipped` : '');
 
     setTimeout(() => {
       elements.poeProgressModal.classList.add('hidden');
       state.poeQueryInProgress = false;
       renderFloorPlan();
-    }, 500);
+    }, result.cancelled ? 500 : 1500);
     return true;
   } catch (error) {
     console.error('Error fetching PoE info:', error);
