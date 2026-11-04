@@ -71,7 +71,7 @@ const state = {
   // Map filters (FR#2) — empty models[] means all models
   mapFilters: {
     status: 'all', // all | online | offline
-    band: 'all',   // all | 6ghz
+    band: 'all',   // all | 6ghz | no6ghz
     afc: 'all',    // all | sp | lpi
     models: []
   },
@@ -2641,6 +2641,8 @@ function accessPointPassesFilters(ap) {
     if (category !== f.status) return false;
   }
   if (f.band === '6ghz' && !apHas6GEnabled(ap)) return false;
+  // Everything not operating on 6 GHz, including APs without a 6 GHz radio
+  if (f.band === 'no6ghz' && apHas6GEnabled(ap)) return false;
   if (f.afc === 'sp' && ap.afcPowerState !== 'SP') return false;
   if (f.afc === 'lpi' && ap.afcPowerState !== 'LPI') return false;
   if (f.models.length > 0 && !f.models.includes(deviceModelName(ap))) return false;

@@ -287,6 +287,7 @@
               <div class="map-filter-options" id="filter-band-options">
                 <label class="map-filter-option"><input type="radio" name="filter-band" value="all" checked> All</label>
                 <label class="map-filter-option"><input type="radio" name="filter-band" value="6ghz"> 6GHz enabled</label>
+                <label class="map-filter-option"><input type="radio" name="filter-band" value="no6ghz"> 6GHz disabled</label>
               </div>
             </div>
 
@@ -632,7 +633,7 @@
           <h2>Example Floor Plan View</h2>
           <button type="button" id="close-example-btn" class="example-close-btn" aria-label="Close example">&times;</button>
         </div>
-        <p class="example-modal-desc">Access points with RF details (channel / bandwidth / Tx power), optional PoE info, and switches on a venue floor plan.</p>
+        <p class="example-modal-desc">Access points with RF details (channel / bandwidth / Tx power / clients), LLDP neighbor and PoE info, and switches with PoE budget on a venue floor plan.</p>
         <div class="example-image-wrap">
           <img src="assets/example-map.jpg" alt="Example Ruckus One AP Mapper floor plan with access points and RF overlays">
         </div>

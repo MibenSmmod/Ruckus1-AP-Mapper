@@ -271,7 +271,7 @@ Getting Started modal itself (test in 4a):
 - [ ] Close popups via X and Esc
 - [ ] **GS4** Search (`/` or icon): hostname, serial, MAC (any separator), IP; keyboard nav in the dropdown; selecting pulses the device; clear
 - [ ] No match → empty dropdown, no crash
-- [ ] **GS5** Filters: status, band (6 GHz enabled), AFC (SP/LPI), model; button badge when active; header shows visible-of-total; Clear resets
+- [ ] **GS5** Filters: status, band (6 GHz enabled / 6 GHz disabled; the two together cover every AP), AFC (SP/LPI), model; button badge when active; header shows visible-of-total; Clear resets
 - [ ] Filtered-out devices are excluded from search, hover, click, and export
 - [ ] **GS9** Settings toggles: hostname, PoE, LLDP, band info, APs, switches — each shows/hides without remount bugs
 
