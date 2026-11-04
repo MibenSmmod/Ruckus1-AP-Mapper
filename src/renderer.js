@@ -5145,10 +5145,13 @@ async function runGlobalSearch({ forceRefresh = false } = {}) {
   renderGlobalSearchResults(hits, query);
 
   const cacheNote = indexResult.fromCache ? ' (cached index)' : '';
+  const apTotal = (indexResult.data.accessPoints || []).length;
+  const switchTotal = (indexResult.data.switches || []).length;
+  const scope = ` · searched ${apTotal} AP${apTotal === 1 ? '' : 's'}, ${switchTotal} switch${switchTotal === 1 ? '' : 'es'}`;
   setGlobalSearchStatus(
-    hits.length
-      ? `${hits.length} match${hits.length === 1 ? '' : 'es'}${cacheNote}`
-      : `No matches${cacheNote}`
+    (hits.length
+      ? `${hits.length} match${hits.length === 1 ? '' : 'es'}`
+      : 'No matches') + scope + cacheNote
   );
   updateGlobalSearchRefreshEnabled();
 }

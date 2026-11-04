@@ -172,7 +172,7 @@ npm start
 
 ### Backend
 - [ ] **Venue count matches R1.** If the tenant has many venues, confirm none are missing (`GET /venues` does not page)
-- [ ] **Global Search AP total matches R1's total AP count** (`GET /venues/aps` does not page; a short count is a Major)
+- [ ] **Global Search AP total matches R1's total AP count** (status line: "… · searched N APs, M switches") (`GET /venues/aps` does not page; a short count is a Major)
 - [ ] Global Search with tenant-wide switch query failing → terminal shows the per-venue fallback warning and the search still works
 - [ ] Logout during a Global Search build → build stops (no further `[GlobalSearch]` lines after logout)
 
