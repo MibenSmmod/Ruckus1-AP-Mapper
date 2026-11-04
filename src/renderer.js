@@ -54,6 +54,7 @@ const state = {
   selectedSearchDevice: null, // { type: 'ap'|'switch', device }
   searchKeyboardIndex: -1, // keyboard highlight in search dropdown (FR#11)
   // FR#17 Global Search
+  mapLoadId: 0, // newest loadFloorPlanData call; older responses are ignored
   floorPlanListLoadId: 0, // newest loadFloorPlans call; older responses are ignored
   globalSearchIndex: null, // { accessPoints, switches, floorsById, fetchedAt }
   globalSearchHits: [], // matched hits for modal list
@@ -2228,7 +2229,7 @@ async function ensureVenueDevices({ force = false } = {}) {
     console.warn('[Venue devices] Access point query failed:', apResult.error || 'Unknown error');
     clearVenueDevices();
     updateVenueDeviceTotals({ error: apResult.error || 'Could not load access points' });
-    return { success: false };
+    return { success: false, error: apResult.error || 'Could not load access points' };
   }
 
   const accessPoints = apResult.data || [];
@@ -2323,6 +2324,10 @@ function closeFloorSwitcher() {
 
 // Load Floor Plan Data (Image, APs, and switches)
 async function loadFloorPlanData({ forceDevices = false } = {}) {
+  // Only the newest load may draw (fast floor switching / Refresh / Back).
+  const loadId = ++state.mapLoadId;
+  const floorPlanId = state.selectedFloorPlan.id;
+  const isCurrent = () => loadId === state.mapLoadId && state.selectedFloorPlan?.id === floorPlanId;
   resetZoomPan();
   elements.mapLoading.classList.remove('hidden');
   elements.mapLoading.textContent = 'Loading floor plan...';
@@ -2337,10 +2342,15 @@ async function loadFloorPlanData({ forceDevices = false } = {}) {
     });
     const devicesPromise = ensureVenueDevices({ force: forceDevices });
 
-    const [imageResult] = await Promise.all([imagePromise, devicesPromise]);
+    const [imageResult, devicesResult] = await Promise.all([imagePromise, devicesPromise]);
+    if (!isCurrent() || devicesResult.stale) return;
 
     if (!imageResult.success) {
       throw new Error(imageResult.error || 'Failed to load floor plan image');
+    }
+    if (!devicesResult.success) {
+      // Don't draw an empty map that looks like a floor with no devices.
+      throw new Error(`Could not load the devices for this floor: ${devicesResult.error || 'unknown error'}`);
     }
 
     // Filter APs for this floor plan (floorplanId is in position object with lowercase 'p')
@@ -2361,7 +2371,6 @@ async function loadFloorPlanData({ forceDevices = false } = {}) {
     applyMapOpacityForSelectedFloor();
 
     // Restore cached AP PoE for this floor if present; keep Display Power Levels as-is
-    const floorPlanId = state.selectedFloorPlan.id;
     if (hasPoeCacheForFloor(floorPlanId)) {
       applyPoeCache(floorPlanId);
       console.log('[PoE] Restored cached PoE data for floor plan:', floorPlanId);
@@ -2379,18 +2388,20 @@ async function loadFloorPlanData({ forceDevices = false } = {}) {
     // Load image
     const img = new Image();
     img.onload = () => {
+      if (!isCurrent()) return;
       state.floorPlanImage = img;
       elements.mapLoading.classList.add('hidden');
       elements.canvas.style.display = 'block';
       renderFloorPlan();
     };
     img.onerror = () => {
-      throw new Error('Failed to load floor plan image');
+      // Throwing here would be uncaught and leave the spinner up forever.
+      if (isCurrent()) elements.mapLoading.textContent = 'Failed to load floor plan image';
     };
     img.src = imageResult.data;
 
   } catch (error) {
-    elements.mapLoading.textContent = error.message;
+    if (isCurrent()) elements.mapLoading.textContent = error.message;
   }
 }
 
@@ -5775,12 +5786,21 @@ async function runPoeQuery(aps, { replaceAll }) {
   elements.currentApText.textContent = '';
 
   const stopProgress = window.api.onPoeProgress(showPoeProgress);
+  const floorPlanId = state.selectedFloorPlan.id;
 
   try {
     const result = await window.api.queryApPoe({
       venueId: state.selectedVenue.id,
       aps: aps.map(poeQueryPayload)
     });
+
+    // Logged out or moved to another floor meanwhile: these labels belong
+    // to a floor that is no longer shown, so don't apply or cache them here.
+    if (state.selectedFloorPlan?.id !== floorPlanId) {
+      elements.poeProgressModal.classList.add('hidden');
+      state.poeQueryInProgress = false;
+      return false;
+    }
 
     if (!result.success) {
       throw new Error(result.error || 'PoE query failed');
@@ -5794,7 +5814,9 @@ async function runPoeQuery(aps, { replaceAll }) {
       ? payload.details
       : {};
 
-    if (replaceAll) {
+    // A cancelled run only covers some APs: merge it so the APs it never
+    // reached keep their earlier cached labels.
+    if (replaceAll && !result.cancelled) {
       state.apPoeInfo = { ...labels };
       state.apPoeDetails = { ...details };
     } else {
