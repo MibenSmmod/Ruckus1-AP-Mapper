@@ -1101,7 +1101,7 @@ function labelForAp(ap, neighbors, port, { refreshUnsupported = false } = {}) {
 
 // Structured PoE row for rollups (FR#4). Map labels stay in `label`.
 function detailForAp(ap, neighbors, port, { refreshUnsupported = false } = {}) {
-  const mac = String(ap.mac || ap.macAddress || '').toLowerCase();
+  const mac = poeResultKey(ap);
   const lldp = pickPseNeighbor(neighbors);
   const label = labelForAp(ap, neighbors, port, { refreshUnsupported });
   const operational = isOperational(ap);
@@ -1166,11 +1166,19 @@ function detailForAp(ap, neighbors, port, { refreshUnsupported = false } = {}) {
   };
 }
 
+// Key for an AP's PoE result: its MAC, or its serial when RUCKUS One hasn't
+// reported a MAC (e.g. a newly added AP). The renderer uses the same rule.
+function poeResultKey(ap) {
+  const mac = String(ap.mac || ap.macAddress || '').toLowerCase();
+  if (mac) return mac;
+  return ap.serialNumber ? `serial:${ap.serialNumber}` : '';
+}
+
 function poeResultsForAps(aps, neighborsBySerial, portIndex, { refreshUnsupported = new Set() } = {}) {
   const labels = {};
   const details = {};
   for (const ap of aps) {
-    const mac = String(ap.mac || ap.macAddress || '').toLowerCase();
+    const mac = poeResultKey(ap);
     if (!mac) continue;
     const neighbors = neighborsBySerial[ap.serialNumber] || [];
     const lldp = pickPseNeighbor(neighbors);
@@ -1207,3 +1215,4 @@ module.exports.imageRedirectOptions = imageRedirectOptions;
 module.exports.friendlyNetworkError = friendlyNetworkError;
 module.exports.authFailureError = authFailureError;
 module.exports.isFirmwareUnsupportedError = isFirmwareUnsupportedError;
+module.exports.poeResultKey = poeResultKey;

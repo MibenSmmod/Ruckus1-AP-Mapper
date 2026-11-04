@@ -356,3 +356,11 @@ test('AP firmware without LLDP refresh (WIFI-10496): query continues and the lab
   assert.ok(RuckusAPI.isFirmwareUnsupportedError(firmwareError));
   assert.ok(!RuckusAPI.isFirmwareUnsupportedError(httpError(400)));
 });
+
+test('PoE results for an AP without a MAC are keyed by serial, not dropped', () => {
+  const ap = { name: 'New-AP', serialNumber: 'S9', status: '2_00_Operational' };
+  const { labels, details } = poeResultsForAps([ap], { S9: [] }, indexPorts([]));
+  assert.ok(labels['serial:S9']);
+  assert.strictEqual(details['serial:S9'].apMac, 'serial:S9');
+  assert.strictEqual(RuckusAPI.poeResultKey({ macAddress: 'AA:BB', serialNumber: 'S9' }), 'aa:bb');
+});

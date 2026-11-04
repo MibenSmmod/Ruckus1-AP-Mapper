@@ -3576,7 +3576,7 @@ function drawChannelLabels(ap, x, y, apRadius, apColor, labelsOnLeft = false, hi
   }
 
   // Check if PoE / LLDP info should be displayed
-  const poeMac = (ap.mac || ap.macAddress || '').toLowerCase();
+  const poeMac = apPoeKey(ap);
   const poeInfo = state.showPoE && poeMac ? state.apPoeInfo[poeMac] : null;
   const poeDetail = state.showLldp && poeMac ? state.apPoeDetails[poeMac] : null;
   const showHost = state.showHostname && ap.name;
@@ -5593,10 +5593,8 @@ function buildPoeRollup() {
 }
 
 function focusApFromPoeDetail(detail) {
-  const mac = String(detail.apMac || '').toLowerCase();
-  const ap = (state.accessPoints || []).find((a) =>
-    String(a.mac || a.macAddress || '').toLowerCase() === mac
-  );
+  const key = String(detail.apMac || '');
+  const ap = (state.accessPoints || []).find((a) => apPoeKey(a) === key);
   if (!ap) return;
   closePoeRollupModal();
   closeSwitchPopup();
@@ -5761,6 +5759,13 @@ function confirmPoeQuery() {
   });
 }
 
+// Same rule as poeResultKey() in src/api/ruckus.js.
+function apPoeKey(ap) {
+  const mac = String(ap?.mac || ap?.macAddress || '').toLowerCase();
+  if (mac) return mac;
+  return ap?.serialNumber ? `serial:${ap.serialNumber}` : '';
+}
+
 function poeQueryPayload(ap) {
   return {
     serialNumber: ap.serialNumber,
@@ -5854,9 +5859,12 @@ async function runPoeQuery(aps, { replaceAll }) {
     const offline = aps.length - online;
     elements.progressFill.style.width = '100%';
     elements.progressText.textContent = result.cancelled ? 'Cancelled' : 'Complete';
+    const labeled = Object.keys(labels).length;
     elements.currentApText.textContent = result.cancelled
       ? ''
-      : `Read ${online} online AP${online === 1 ? '' : 's'}` +
+      : labeled === 0
+        ? 'RUCKUS One returned no PoE data for these APs'
+        : `Read ${online} online AP${online === 1 ? '' : 's'}` +
         (offline ? ` · ${offline} offline AP${offline === 1 ? '' : 's'} skipped` : '');
 
     setTimeout(() => {

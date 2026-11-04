@@ -580,6 +580,9 @@ ipcMain.handle('query-ap-poe', async (event, { venueId, aps }) => {
       onProgress: sendPoeProgress,
       shouldCancel: () => run.cancelled
     });
+    const labelCount = Object.keys((data && data.labels) || {}).length;
+    const sent = Array.isArray(aps) ? aps.length : 0;
+    console.log(`[PoE] ${run.cancelled ? 'Cancelled' : 'Done'}: ${labelCount} of ${sent} AP${sent === 1 ? '' : 's'} labeled`);
     return { success: true, data, cancelled: run.cancelled };
   } catch (error) {
     console.error('[PoE] Query failed:', error.message);
