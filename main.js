@@ -5,7 +5,7 @@ const RuckusAPI = require('./src/api/ruckus');
 const { checkForUpdates } = require('./src/updater');
 const { createPdfFromJpeg } = require('./src/exportPdf');
 
-const APP_DISPLAY_NAME = 'RUCKUS One AP Mapper';
+const APP_DISPLAY_NAME = 'RUCKUS One Device Mapper';
 const CONFIG_VERSION_ENCRYPTED = 2;
 
 let mainWindow;
@@ -218,7 +218,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false
     },
-    title: 'RUCKUS One AP Mapper'
+    title: 'RUCKUS One Device Mapper'
   };
   if (icon) {
     options.icon = icon;

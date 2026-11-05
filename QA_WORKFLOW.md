@@ -1,4 +1,4 @@
-# QA Workflow — RUCKUS One AP Mapper
+# QA Workflow — RUCKUS One Device Mapper
 
 Guided **Test → Fix → Validate** process for the full app journey:
 
@@ -370,7 +370,7 @@ Getting Started modal itself (test in 4a):
 - [ ] Build: `npm run build:mac-arm64` (and x64 / win as needed)
 - [ ] Inspect the package contents — only `main.js`, `preload.js`, `src/**`, `package.json`; no `tests/`, `scripts/`, `config.json`, `.env`:
   ```bash
-  npx asar list "dist/mac-arm64/RUCKUS One AP Mapper.app/Contents/Resources/app.asar"
+  npx asar list "dist/mac-arm64/RUCKUS One Device Mapper.app/Contents/Resources/app.asar"
   ```
 - [ ] Install with **cleared userData** → login fields empty
 - [ ] macOS: app opens without Gatekeeper warnings (signed + notarized)
