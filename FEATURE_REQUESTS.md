@@ -26,7 +26,8 @@ Status: `🟢 open` | `in progress` | `done` | `wontfix`
 | [FR#18](#fr18---move-device-locations-on-the-map) | done | Move device locations on the map and update R1 |
 | [FR#19](#fr19---map-opacity) | done | Map opacity |
 | [FR#20](#fr20---create-a-getting-started-guide) | done | Create a getting started guide |
-| [FR#21](#fr21---placeholder) | 🟢 open | placeholder |
+| [FR#21](#fr21---enhance-getting-started-guide) | 🟢 open | Ehhance Gettings Started feature |
+| [FR#22](#fr22---network-topology) | 🟢 open | Network Topology |
 
 ---
 
@@ -40,7 +41,7 @@ Export the current floor plan with AP labels (hostname, RF, PoE) as PNG or PDF f
 
 New icon Filter:  Map filters such as offline only or online only, tri-band or dual-band, 6 GHz only, or specific models (e.g. R770, ICX8200-C08ZP), AFC SP or AFC LPI. Complements existing search on large floors.  Change the icon if there's a filter applied so the user knows there are items potentially missing from the page.
 
-**Done:** Funnel filter button beside search. Panel filters by status (online/offline), band (All / 6GHz enabled), AFC (SP/LPI), and multi-select models from the current floor. “6GHz enabled” shows only APs with a 6 GHz channel and hides switches. Active filters highlight the button (primary fill + badge); header shows visible-of-total counts; search, hit-testing, and export follow the same visibility rules. Band/AFC filters hide switches (AP-only).
+**Done:** Funnel filter button beside search. Panel filters by status (online/offline), band (All / 6GHz enabled / 6GHz disabled), AFC (SP/LPI), and multi-select models from the current floor. “6GHz enabled” shows only APs with a 6 GHz channel; “6GHz disabled” shows the rest (including APs without a 6 GHz radio); both hide switches. Active filters highlight the button (primary fill + badge); header shows visible-of-total counts; search, hit-testing, and export follow the same visibility rules. Band/AFC filters hide switches (AP-only).
 
 ## FR#3 — Channel / co-channel highlight
 
@@ -148,9 +149,15 @@ Provide a list of things the user can do and try in a checkbox format.  Add Gett
 
 **Done:** Help → Getting Started and a checklist toolbar button left of map Search open a modal with try-it checkboxes (Edit mode listed above Query PoE & LLDP). Progress persists in localStorage; Reset progress clears checks. Esc / Done / backdrop close like other modals.
 
-## FR#21 - Placeholder
+## FR#21 - Enhance Getting Started Guide
 
-Placeholder
+Make the popout a floating window so it can stay on the screen while the user tries features.  Allow them to drag outside of the application window if possible.  Do not implement this if you can't make this happen.  It's too large and takes up a lot of space within the application window X/Y area.
+
+## FR#22 - Network Topology
+
+Create a page similar to the R1 UX that compiles a network topology with devices that are clickable.  If the device is offline then show it with a red dot and red cable.  Use LLDP to track connections and show a label with which ports are connected.
+
+Reference (R1 topology view): tree layout with Cloud at the top, ICX switches below it, and APs below each switch. Each device shows a model icon, a full hostname, and a status dot; links are curved cables (green when online), with a collapse (⊖) toggle under each switch for its children.
 
 ---
 
