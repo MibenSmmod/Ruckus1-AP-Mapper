@@ -880,6 +880,12 @@ function applyRadioStatuses(accessPoints, rows) {
       if (Number.isFinite(calibration) && calibration > 0) ap.radio[key].calibrationTxPower = calibration;
       const bandwidth = String(radio.channelBandwidth || '');
       if (/\d/.test(bandwidth)) ap.radio[key].operativeChannelBandwidth = bandwidth;
+      // APs on venue radio settings (useVenueSettings) omit enable6G from GET /venues/aps;
+      // an operating 6G radio in the live status is the source of truth.
+      if (key === 'apRadioParams6G' && Number(radio.channel) > 0) {
+        ap.radio.live6G = true;
+        if (!ap.radio[key].operativeChannel) ap.radio[key].operativeChannel = Number(radio.channel);
+      }
     }
   }
   return accessPoints;

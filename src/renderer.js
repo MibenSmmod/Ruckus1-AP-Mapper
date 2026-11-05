@@ -2628,8 +2628,14 @@ function deviceStatusCategory(status) {
 // 6GHz enabled filter: radio is on and has a 6 GHz channel configured/operating
 function apHas6GEnabled(ap) {
   const radio = ap && ap.radio;
-  if (!radio || radio.enable6G !== true || !radio.apRadioParams6G) return false;
+  if (!radio6GEnabled(radio)) return false;
   return !!radio.apRadioParams6G.operativeChannel;
+}
+
+// 6G radio is on: explicit per-AP enable6G, or (venue-inherited settings) the
+// live radio status reports an operating 6G radio (set by applyRadioStatuses).
+function radio6GEnabled(radio) {
+  return !!(radio && radio.apRadioParams6G && (radio.enable6G === true || radio.live6G === true));
 }
 
 function deviceModelName(device) {
@@ -2978,7 +2984,7 @@ function getApChannelKeys(ap) {
   if (radio.apRadioParams50G && radio.apRadioParams50G.operativeChannel) {
     keys.add(`5G:${radio.apRadioParams50G.operativeChannel}`);
   }
-  if (radio.enable6G === true && radio.apRadioParams6G && radio.apRadioParams6G.operativeChannel) {
+  if (radio6GEnabled(radio) && radio.apRadioParams6G.operativeChannel) {
     keys.add(`6G:${radio.apRadioParams6G.operativeChannel}`);
   }
   return keys;
@@ -3567,8 +3573,8 @@ function drawChannelLabels(ap, x, y, apRadius, apColor, labelsOnLeft = false, hi
       }
     }
 
-    // 6GHz - only show if hardware is enabled (enable6G: true)
-    if (radio.apRadioParams6G && radio.enable6G === true) {
+    // 6GHz - only show if enabled (enable6G: true, or live status reports 6G)
+    if (radio6GEnabled(radio)) {
       if (radio.apRadioParams6G.operativeChannel) {
         const ch = radio.apRadioParams6G.operativeChannel;
         const bw = operativeBandwidth(radio.apRadioParams6G);
@@ -4604,7 +4610,7 @@ function showAPPopup(ap) {
     const parts = [];
     if (radio.apRadioParams24G) parts.push(`2.4G: ${byBand['2.4G'] || 0}`);
     if (radio.apRadioParams50G) parts.push(`5G: ${byBand['5G'] || 0}`);
-    if (radio.apRadioParams6G && radio.enable6G === true) parts.push(`6G: ${byBand['6G'] || 0}`);
+    if (radio6GEnabled(radio)) parts.push(`6G: ${byBand['6G'] || 0}`);
     if (!parts.length) {
       // No radio config to filter bands — show whatever counts we have.
       for (const band of ['2.4G', '5G', '6G']) {

@@ -110,6 +110,25 @@ test('applyRadioStatuses copies live tx power, bandwidth, AFC and client count',
   assert.strictEqual(aps[0].radio.apRadioParams24G.actualTxPower, undefined);
 });
 
+test('applyRadioStatuses marks live 6G for APs on venue settings (no enable6G)', () => {
+  const aps = [
+    { serialNumber: 'S1', radio: { useVenueSettings: true, apRadioParams6G: { operativeChannel: 69 } } },
+    { serialNumber: 'S2', radio: { useVenueSettings: true, apRadioParams6G: {} } },
+    { serialNumber: 'S3', radio: { apRadioParams6G: {} } }
+  ];
+  applyRadioStatuses(aps, [
+    { serialNumber: 'S1', radioStatuses: [{ band: '6G', channel: 69, channelBandwidth: '160', actualTxPower: 22 }] },
+    { serialNumber: 'S2', radioStatuses: [{ band: '6G', channel: 37, channelBandwidth: '320' }] },
+    { serialNumber: 'S3', radioStatuses: [{ band: '6G', channel: 0 }] }
+  ]);
+  assert.strictEqual(aps[0].radio.live6G, true);
+  assert.strictEqual(aps[0].radio.apRadioParams6G.operativeChannel, 69);
+  assert.strictEqual(aps[0].radio.apRadioParams6G.actualTxPower, 22);
+  assert.strictEqual(aps[1].radio.live6G, true);
+  assert.strictEqual(aps[1].radio.apRadioParams6G.operativeChannel, 37);
+  assert.strictEqual(aps[2].radio.live6G, undefined);
+});
+
 test('applyClientBandCounts totals clients per band and matches by serial or MAC', () => {
   const aps = [
     { serialNumber: 'S1', mac: 'AA:AA:AA:AA:AA:01' },
