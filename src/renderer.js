@@ -5353,26 +5353,13 @@ function dataUrlToBase64(dataUrl) {
   return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
 }
 
-/**
- * Render the full floor plan (ignores zoom/pan) with current label settings
- * onto an offscreen canvas for PNG/PDF export.
- */
-function buildExportCanvas() {
+// Draw the floor image (optional) and device overlay into targetCtx with the
+// floor image's top-left at (originX, originY). Temporarily swaps the live
+// canvas context and view state so the normal draw code renders unzoomed.
+function drawExportLayer(targetCtx, drawScale, dpr, originX, originY, { withImage }) {
   const img = state.floorPlanImage;
-  if (!img) return null;
-
-  const container = elements.canvas.parentElement;
-  const fitScale = Math.min(container.clientWidth / img.width, container.clientHeight / img.height);
-  const dpr = 2;
-  const drawScale = fitScale * dpr;
-  const margin = Math.round(48 * dpr);
   const scaledWidth = img.width * drawScale;
   const scaledHeight = img.height * drawScale;
-
-  const exportCanvas = document.createElement('canvas');
-  exportCanvas.width = Math.ceil(scaledWidth + margin * 2);
-  exportCanvas.height = Math.ceil(scaledHeight + margin * 2);
-  const exportCtx = exportCanvas.getContext('2d');
 
   const prev = {
     ctx,
@@ -5387,27 +5374,26 @@ function buildExportCanvas() {
     drawPixelRatio: state.drawPixelRatio
   };
 
-  ctx = exportCtx;
+  ctx = targetCtx;
   state.scale = drawScale;
   state.zoom = 1;
   state.panX = 0;
   state.panY = 0;
-  state.offsetX = margin;
-  state.offsetY = margin;
+  state.offsetX = originX;
+  state.offsetY = originY;
   state.selectedSearchDevice = null;
   state.hoveredDevice = null;
   state.drawPixelRatio = dpr;
 
   try {
-    // FR#12: exports always use a light background, regardless of UI dark mode
     // FR#3: hoveredDevice is cleared above so co-channel overlay stays ephemeral
     // FR#19: floor image uses the same opacity as the live map; devices stay full alpha
-    exportCtx.fillStyle = '#ffffff';
-    exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-    exportCtx.save();
-    exportCtx.globalAlpha = clampMapOpacity(state.mapOpacityPercent) / 100;
-    exportCtx.drawImage(img, margin, margin, scaledWidth, scaledHeight);
-    exportCtx.restore();
+    if (withImage) {
+      targetCtx.save();
+      targetCtx.globalAlpha = clampMapOpacity(state.mapOpacityPercent) / 100;
+      targetCtx.drawImage(img, originX, originY, scaledWidth, scaledHeight);
+      targetCtx.restore();
+    }
     beginMapDeviceDraw();
     if (state.showAPs) {
       drawAccessPoints();
@@ -5427,6 +5413,78 @@ function buildExportCanvas() {
     state.hoveredDevice = prev.hoveredDevice;
     state.drawPixelRatio = prev.drawPixelRatio;
   }
+}
+
+// Bounding box of every non-transparent pixel on a canvas, or null if empty.
+function opaqueBounds(canvas) {
+  const { width, height } = canvas;
+  const data = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    const row = y * width * 4;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x * 4 + 3] !== 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  return maxX < 0 ? null : { minX, minY, maxX, maxY };
+}
+
+/**
+ * Render the full floor plan (ignores zoom/pan) with current label settings
+ * onto an offscreen canvas for PNG/PDF export. The canvas grows past the floor
+ * image where device labels extend beyond it, so no label is cropped.
+ */
+function buildExportCanvas() {
+  const img = state.floorPlanImage;
+  if (!img) return null;
+
+  const container = elements.canvas.parentElement;
+  const fitScale = Math.min(container.clientWidth / img.width, container.clientHeight / img.height);
+  const dpr = 2;
+  const drawScale = fitScale * dpr;
+  const margin = Math.round(48 * dpr);
+  const scaledWidth = img.width * drawScale;
+  const scaledHeight = img.height * drawScale;
+
+  // Pass 1: devices only, on a transparent scratch canvas with room on every
+  // side, to find how far labels reach past the floor image.
+  const MAX_SIDE = 16000; // stay under Chromium's canvas size limit
+  const probeMargin = Math.max(0, Math.min(
+    Math.round(Math.max(scaledWidth, scaledHeight) * 0.5 + 400 * dpr),
+    Math.floor((MAX_SIDE - Math.max(scaledWidth, scaledHeight)) / 2)
+  ));
+  const probe = document.createElement('canvas');
+  probe.width = Math.ceil(scaledWidth + probeMargin * 2);
+  probe.height = Math.ceil(scaledHeight + probeMargin * 2);
+  drawExportLayer(probe.getContext('2d'), drawScale, dpr, probeMargin, probeMargin, { withImage: false });
+  const bounds = opaqueBounds(probe);
+
+  // Overflow of the device layer past each edge of the floor image.
+  const overLeft = bounds ? Math.max(0, probeMargin - bounds.minX) : 0;
+  const overTop = bounds ? Math.max(0, probeMargin - bounds.minY) : 0;
+  const overRight = bounds ? Math.max(0, bounds.maxX + 1 - (probeMargin + scaledWidth)) : 0;
+  const overBottom = bounds ? Math.max(0, bounds.maxY + 1 - (probeMargin + scaledHeight)) : 0;
+
+  // Pass 2: final canvas = floor image + label overflow + the usual margin.
+  const originX = margin + Math.ceil(overLeft);
+  const originY = margin + Math.ceil(overTop);
+  const exportCanvas = document.createElement('canvas');
+  exportCanvas.width = Math.ceil(originX + scaledWidth + overRight + margin);
+  exportCanvas.height = Math.ceil(originY + scaledHeight + overBottom + margin);
+  const exportCtx = exportCanvas.getContext('2d');
+
+  // FR#12: exports always use a light background, regardless of UI dark mode
+  exportCtx.fillStyle = '#ffffff';
+  exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+  drawExportLayer(exportCtx, drawScale, dpr, originX, originY, { withImage: true });
 
   return exportCanvas;
 }
