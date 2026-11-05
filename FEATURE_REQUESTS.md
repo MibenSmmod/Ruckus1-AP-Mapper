@@ -26,7 +26,7 @@ Status: `🟢 open` | `in progress` | `done` | `wontfix`
 | [FR#18](#fr18---move-device-locations-on-the-map) | done | Move device locations on the map and update R1 |
 | [FR#19](#fr19---map-opacity) | done | Map opacity |
 | [FR#20](#fr20---create-a-getting-started-guide) | done | Create a getting started guide |
-| [FR#21](#fr21---enhance-getting-started-guide) | 🟢 open | Ehhance Gettings Started feature |
+| [FR#21](#fr21---enhance-getting-started-guide) | 🟢 open | Enhance Getting Started feature |
 | [FR#22](#fr22---network-topology) | 🟢 open | Network Topology |
 
 ---
