@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const RuckusAPI = require('./src/api/ruckus');
 const { checkForUpdates } = require('./src/updater');
-const { createPdfFromJpeg } = require('./src/exportPdf');
+const { createPdfFromJpeg, paperForCountry } = require('./src/exportPdf');
 
 const APP_DISPLAY_NAME = 'RUCKUS One Device Mapper';
 const CONFIG_VERSION_ENCRYPTED = 2;
@@ -414,7 +414,8 @@ ipcMain.handle('export-map', async (event, { dataBase64, format, defaultName, wi
 
     const binary = Buffer.from(dataBase64, 'base64');
     if (isPdf) {
-      const pdf = createPdfFromJpeg(binary, width, height);
+      const paper = paperForCountry(app.getLocaleCountryCode());
+      const pdf = createPdfFromJpeg(binary, width, height, { paper });
       fs.writeFileSync(result.filePath, pdf);
     } else {
       fs.writeFileSync(result.filePath, binary);
