@@ -2909,10 +2909,19 @@ function deviceStatusColor(status) {
   if (value === 'insetupphase' || value === 'applying' || value.includes('setup')) {
     return '#ff9800'; // Orange
   }
-  if (value === 'warning' || value === 'degraded' || value === 'operationalwarning') {
+  if (
+    value === 'warning' ||
+    value === 'degraded' ||
+    value === 'operationalwarning' ||
+    value === 'transientissue'
+  ) {
     return '#ffc107'; // Yellow
   }
   if (
+    // RUCKUS One AP state for 3_xx sub-states such as 3_04_DisconnectedFromCloud.
+    // R1 shows these APs with a red dot, so the map must not draw them green.
+    value === 'requiresattention' ||
+    value.includes('disconnected') ||
     value === 'offline' ||
     value === 'disconnected' ||
     value === 'unknown' ||
@@ -4567,12 +4576,15 @@ function showAPPopup(ap) {
 
   // API uses 'state' field (e.g., "Operational", "Offline")
   const status = ap.state || ap.subState || 'Unknown';
-  elements.apStatus.textContent = status;
+  elements.apStatus.textContent = apStatusLabel(ap);
   elements.apStatus.className = 'value';
-  if (status.toLowerCase() === 'operational' || status.toLowerCase() === 'online') {
+  const statusCategory = deviceStatusCategory(status);
+  if (statusCategory === 'online') {
     elements.apStatus.classList.add('status-online');
-  } else if (status.toLowerCase() === 'offline' || status.toLowerCase() === 'disconnected') {
+  } else if (statusCategory === 'offline') {
     elements.apStatus.classList.add('status-offline');
+  } else {
+    elements.apStatus.classList.add('status-warning');
   }
 
   elements.apModel.textContent = ap.model || 'N/A';
@@ -4618,6 +4630,26 @@ function showAPPopup(ap) {
   elements.apPoeQueryBtn.disabled = !isOperational;
 
   elements.apPopup.classList.remove('hidden');
+}
+
+// Readable AP status for the popup. RUCKUS One puts the coarse state in
+// ap.state (e.g. "RequiresAttention") and the detail in ap.status /
+// ap.subState as a coded value (e.g. "3_04_DisconnectedFromCloud").
+function apStatusLabel(ap) {
+  const stateText = String(ap.state || '').trim();
+  const detailRaw = [ap.status, ap.subState]
+    .map((v) => String(v || '').trim())
+    .find((v) => v && v !== stateText);
+  const detail = detailRaw
+    ? detailRaw
+        .replace(/^\d+_\d+_/, '')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .trim()
+    : '';
+  if (!stateText) return detail || 'Unknown';
+  // The detail (e.g. "Disconnected From Cloud") is what R1 itself shows and
+  // is more specific than the state, so prefer it on its own.
+  return detail || stateText;
 }
 
 // Close AP Popup
