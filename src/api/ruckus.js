@@ -139,7 +139,7 @@ class RuckusAPI {
     }
   }
 
-  // Authenticate with Ruckus ONE
+  // Authenticate with RUCKUS ONE
   async authenticate(tenantId, clientId, clientSecret) {
     this.tenantId = tenantId;
     this.clientId = clientId;

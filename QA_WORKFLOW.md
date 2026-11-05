@@ -1,4 +1,4 @@
-# QA Workflow — Ruckus One AP Mapper
+# QA Workflow — RUCKUS One AP Mapper
 
 Guided **Test → Fix → Validate** process for the full app journey:
 
@@ -81,7 +81,7 @@ npm install
 npm start
 ```
 
-- Use a real Ruckus ONE tenant with at least one multi-floor venue, if possible.
+- Use a real RUCKUS ONE tenant with at least one multi-floor venue, if possible.
 - Keep the `npm start` terminal visible (backend logs) and open DevTools (Console + Application).
 - Optional first-run test: quit the app and clear userData (`~/Library/Application Support/ruckus-one-ap-mapper/`).
 - Note in R1 for later comparison: venue count, total AP/switch counts, and 2–3 known AP positions.
@@ -370,7 +370,7 @@ Getting Started modal itself (test in 4a):
 - [ ] Build: `npm run build:mac-arm64` (and x64 / win as needed)
 - [ ] Inspect the package contents — only `main.js`, `preload.js`, `src/**`, `package.json`; no `tests/`, `scripts/`, `config.json`, `.env`:
   ```bash
-  npx asar list "dist/mac-arm64/Ruckus One AP Mapper.app/Contents/Resources/app.asar"
+  npx asar list "dist/mac-arm64/RUCKUS One AP Mapper.app/Contents/Resources/app.asar"
   ```
 - [ ] Install with **cleared userData** → login fields empty
 - [ ] macOS: app opens without Gatekeeper warnings (signed + notarized)

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test Ruckus ONE API Authentication
+# Test RUCKUS ONE API Authentication
 # Usage: ./test-auth.sh <tenant_id> <client_id>
 #
 # The client secret is read from R1_CLIENT_SECRET or a hidden prompt, and is

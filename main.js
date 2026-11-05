@@ -5,7 +5,7 @@ const RuckusAPI = require('./src/api/ruckus');
 const { checkForUpdates } = require('./src/updater');
 const { createPdfFromJpeg } = require('./src/exportPdf');
 
-const APP_DISPLAY_NAME = 'Ruckus One AP Mapper';
+const APP_DISPLAY_NAME = 'RUCKUS One AP Mapper';
 const CONFIG_VERSION_ENCRYPTED = 2;
 
 let mainWindow;
@@ -218,7 +218,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false
     },
-    title: 'Ruckus One AP Mapper'
+    title: 'RUCKUS One AP Mapper'
   };
   if (icon) {
     options.icon = icon;
@@ -259,7 +259,7 @@ app.whenReady().then(() => {
     applicationName: APP_DISPLAY_NAME,
     applicationVersion: app.getVersion(),
     version: app.getVersion(),
-    copyright: 'Unofficial community tool — not affiliated with Belden Inc. or Ruckus.'
+    copyright: 'Unofficial community tool — not affiliated with Belden Inc. or RUCKUS.'
   });
 
   const icon = getDevIconPath();
@@ -467,7 +467,7 @@ ipcMain.handle('clear-credentials', async () => {
   }
 });
 
-// Authenticate with Ruckus ONE
+// Authenticate with RUCKUS ONE
 ipcMain.handle('authenticate', async (event, { tenantId, clientId, clientSecret, region }) => {
   try {
     ruckusClient = new RuckusAPI(region);

@@ -13,7 +13,7 @@ contextBridge.exposeInMainWorld('api', {
   authenticate: (params) => ipcRenderer.invoke('authenticate', params),
   logout: () => ipcRenderer.invoke('logout'),
 
-  // Ruckus API calls
+  // RUCKUS API calls
   getVenues: (tenantId) => ipcRenderer.invoke('get-venues', tenantId),
   getFloorPlans: (params) => ipcRenderer.invoke('get-floor-plans', params),
   getFloorPlanImage: (params) => ipcRenderer.invoke('get-floor-plan-image', params),

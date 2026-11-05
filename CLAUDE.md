@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ruckus One AP Mapper is an Electron desktop application for visualizing Ruckus ONE access point locations on venue floor plans with RF and power information overlay. Built with Node.js (CommonJS modules), it integrates with the Ruckus ONE REST API for AP data and for Power over Ethernet (PoE) information (AP LLDP neighbors and ICX switch ports).
+RUCKUS One AP Mapper is an Electron desktop application for visualizing RUCKUS ONE access point locations on venue floor plans with RF and power information overlay. Built with Node.js (CommonJS modules), it integrates with the RUCKUS ONE REST API for AP data and for Power over Ethernet (PoE) information (AP LLDP neighbors and ICX switch ports).
 
 ## Architecture
 
@@ -17,7 +17,7 @@ ruckus-one-ap-mapper/
 │   ├── styles.css          # Application styles
 │   ├── renderer.js         # UI logic, canvas rendering
 │   └── api/
-│       └── ruckus.js       # Ruckus ONE API client
+│       └── ruckus.js       # RUCKUS ONE API client
 ├── tests/
 │   └── ruckus.test.js      # API client unit tests (stubbed, no network)
 └── config.json             # Encrypted user credentials in userData (gitignored)
@@ -67,16 +67,16 @@ npm test
 - `electron` (^28.0.0) - Framework for building desktop applications
 - `electron-builder` (^24.9.1) - Build and packaging tool for creating installers (macOS .dmg, Windows .exe)
 
-## Ruckus ONE API
+## RUCKUS ONE API
 
-The app connects to Ruckus ONE cloud via REST API:
+The app connects to RUCKUS ONE cloud via REST API:
 - Authentication: OAuth2 client credentials flow
 - Regions supported: North America (na), Europe (eu), Asia (asia)
 - Endpoints: venues, floor plans, access points
 
 ## Key Features
 
-- Login with Ruckus ONE API credentials
+- Login with RUCKUS ONE API credentials
 - Browse venues and floor plans
 - Display floor plan images with AP overlay
 - Click APs to view details (name, MAC, status, model)
@@ -88,7 +88,7 @@ The app connects to Ruckus ONE cloud via REST API:
 ## UI Screens
 
 1. **Login Screen**: Region selection, tenant/client credentials, save option
-2. **Venue Selection**: List of venues from Ruckus ONE account
+2. **Venue Selection**: List of venues from RUCKUS ONE account
 3. **Floor Plan Selection**: List of floor plans for selected venue
 4. **Map Screen**: Floor plan image with AP overlay, search, zoom, settings, refresh
 
@@ -151,7 +151,7 @@ Toggles update via checkbox symbols: ☐ (unchecked) / ☑ (checked)
 - **PoE level** (optional) shows power info below channel labels
 
 ### Floor Plan
-- Background: floor plan image from Ruckus ONE
+- Background: floor plan image from RUCKUS ONE
 - Interactive canvas with zoom controls (±, reset)
 - Font size controls (small, medium, large)
 - Pan support on canvas
