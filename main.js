@@ -5,13 +5,46 @@ const RuckusAPI = require('./src/api/ruckus');
 const { checkForUpdates } = require('./src/updater');
 const { createPdfFromJpeg } = require('./src/exportPdf');
 
-const APP_DISPLAY_NAME = 'Ruckus One AP Mapper';
+const APP_DISPLAY_NAME = 'RUCKUS One AP Mapper';
 const CONFIG_VERSION_ENCRYPTED = 2;
 
 let mainWindow;
 let ruckusClient = null;
-let poeQueryCancelled = false;
+// Per-run cancel tokens: starting a run never clears another run's cancel.
+// Cancel stops every active run of that kind.
+const activePoeRuns = new Set();
+const activeGlobalSearchRuns = new Set();
+
+function cancelRuns(runs) {
+  for (const run of runs) run.cancelled = true;
+}
 let darkModeEnabled = true; // matches renderer default; synced from renderer on load
+
+const GLOBAL_SEARCH_SWITCH_CONCURRENCY = 4;
+const GLOBAL_SEARCH_FLOOR_CONCURRENCY = 4;
+
+function sendGlobalSearchProgress(info) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('global-search-progress', info);
+  }
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const list = Array.isArray(items) ? items : [];
+  if (list.length === 0) return [];
+  const results = new Array(list.length);
+  let next = 0;
+  const runnerCount = Math.min(Math.max(1, concurrency), list.length);
+  await Promise.all(Array.from({ length: runnerCount }, async () => {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= list.length) return;
+      results[index] = await worker(list[index], index);
+    }
+  }));
+  return results;
+}
 
 function setDarkModeEnabled(dark) {
   darkModeEnabled = !!dark;
@@ -137,6 +170,14 @@ function createApplicationMenu() {
       role: 'help',
       submenu: [
         {
+          label: 'Getting Started',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('show-getting-started');
+            }
+          }
+        },
+        {
           label: 'Keyboard Shortcuts',
           accelerator: 'CmdOrCtrl+/',
           click: () => {
@@ -177,7 +218,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false
     },
-    title: 'Ruckus One AP Mapper'
+    title: 'RUCKUS One AP Mapper'
   };
   if (icon) {
     options.icon = icon;
@@ -218,7 +259,7 @@ app.whenReady().then(() => {
     applicationName: APP_DISPLAY_NAME,
     applicationVersion: app.getVersion(),
     version: app.getVersion(),
-    copyright: 'Unofficial community tool — not affiliated with Belden Inc. or Ruckus.'
+    copyright: 'Unofficial community tool — not affiliated with Belden Inc. or RUCKUS.'
   });
 
   const icon = getDevIconPath();
@@ -308,7 +349,9 @@ function isPlaintextCredentials(stored) {
 
 function writeEncryptedCredentials(credentials) {
   const encryptedConfig = encryptCredentials(credentials);
-  fs.writeFileSync(configPath, JSON.stringify(encryptedConfig, null, 2));
+  // Owner-only: the payload is Keychain/DPAPI-bound, but keep it unreadable to other users too.
+  fs.writeFileSync(configPath, JSON.stringify(encryptedConfig, null, 2), { mode: 0o600 });
+  fs.chmodSync(configPath, 0o600);
 }
 
 function loadStoredCredentials() {
@@ -424,7 +467,7 @@ ipcMain.handle('clear-credentials', async () => {
   }
 });
 
-// Authenticate with Ruckus ONE
+// Authenticate with RUCKUS ONE
 ipcMain.handle('authenticate', async (event, { tenantId, clientId, clientSecret, region }) => {
   try {
     ruckusClient = new RuckusAPI(region);
@@ -526,29 +569,232 @@ function sendPoeProgress(info) {
 
 // PoE from RUCKUS One: AP LLDP neighbors plus the matched switch port.
 ipcMain.handle('query-ap-poe', async (event, { venueId, aps }) => {
+  let run = null;
   try {
     if (!ruckusClient) {
       throw new Error('Not authenticated');
     }
-    poeQueryCancelled = false;
+    run = { cancelled: false };
+    activePoeRuns.add(run);
     const data = await ruckusClient.queryApPoe(venueId, aps, {
       onProgress: sendPoeProgress,
-      shouldCancel: () => poeQueryCancelled
+      shouldCancel: () => run.cancelled
     });
-    return { success: true, data, cancelled: poeQueryCancelled };
+    const labelCount = Object.keys((data && data.labels) || {}).length;
+    const sent = Array.isArray(aps) ? aps.length : 0;
+    console.log(`[PoE] ${run.cancelled ? 'Cancelled' : 'Done'}: ${labelCount} of ${sent} AP${sent === 1 ? '' : 's'} labeled`);
+    return { success: true, data, cancelled: run.cancelled };
   } catch (error) {
     console.error('[PoE] Query failed:', error.message);
-    return { success: false, error: error.message, cancelled: poeQueryCancelled };
+    return { success: false, error: error.message, cancelled: !!(run && run.cancelled) };
+  } finally {
+    if (run) activePoeRuns.delete(run);
   }
 });
 
 ipcMain.handle('cancel-ap-poe', async () => {
-  poeQueryCancelled = true;
+  cancelRuns(activePoeRuns);
+  return { success: true };
+});
+
+// FR#18: update AP or switch floor-plan coordinates (allowlisted PUTs only).
+// Payload is typed — never accepts raw HTTP method/path from the renderer.
+ipcMain.handle('update-device-position', async (event, params = {}) => {
+  try {
+    if (!ruckusClient) {
+      throw new Error('Not authenticated');
+    }
+    const { type, venueId, floorPlanId, deviceId, xPercent, yPercent } = params;
+    if (type !== 'ap' && type !== 'switch') {
+      throw new Error('type must be "ap" or "switch"');
+    }
+    if (!venueId || !floorPlanId || !deviceId) {
+      throw new Error('venueId, floorPlanId, and deviceId are required');
+    }
+    if (type === 'ap') {
+      await ruckusClient.updateApFloorPosition({
+        venueId,
+        floorPlanId,
+        serialNumber: deviceId,
+        xPercent,
+        yPercent
+      });
+    } else {
+      await ruckusClient.updateSwitchPosition({
+        venueId,
+        switchId: deviceId,
+        floorPlanId,
+        xPercent,
+        yPercent
+      });
+    }
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      statusCode: error.statusCode || null
+    };
+  }
+});
+
+// FR#18: probe whether the token can write floor positions by re-writing a
+// placed device's current coordinates (no coordinate change).
+ipcMain.handle('probe-placement-write-access', async (event, params = {}) => {
+  try {
+    if (!ruckusClient) {
+      throw new Error('Not authenticated');
+    }
+    const { type, venueId, floorPlanId, deviceId, xPercent, yPercent } = params;
+    if (type !== 'ap' && type !== 'switch') {
+      throw new Error('type must be "ap" or "switch"');
+    }
+    const result = await ruckusClient.probePlacementWriteAccess({
+      type,
+      venueId,
+      floorPlanId,
+      deviceId,
+      xPercent,
+      yPercent
+    });
+    return { success: true, ...result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      statusCode: error.statusCode || null
+    };
+  }
+});
+
+// FR#17: lean tenant device index for Global Search (no radio/clients/PoE)
+ipcMain.handle('build-global-search-index', async (event, { tenantId, venues }) => {
+  let run = null;
+  try {
+    if (!ruckusClient) {
+      throw new Error('Not authenticated');
+    }
+    // Keep this run's client: logout sets ruckusClient to null while
+    // requests may still be in flight.
+    const client = ruckusClient;
+    run = { cancelled: false };
+    activeGlobalSearchRuns.add(run);
+    const venueList = Array.isArray(venues) ? venues : [];
+    const floorSteps = Math.max(venueList.length, 1);
+    let done = 0;
+    let total = 1 + 1 + floorSteps; // APs + switches + floor plans
+
+    const report = (phase, message) => {
+      const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+      sendGlobalSearchProgress({ percent, phase, message, done, total });
+    };
+
+    const throwIfCancelled = () => {
+      if (run.cancelled) {
+        const err = new Error('Cancelled');
+        err.cancelled = true;
+        throw err;
+      }
+    };
+
+    report('aps', 'Fetching access points...');
+    const accessPoints = await client.getAllAccessPoints(tenantId);
+    throwIfCancelled();
+    done += 1;
+    report('aps', `Loaded ${accessPoints.length} access points`);
+
+    let switches = [];
+    report('switches', 'Fetching switches...');
+    try {
+      switches = await client.getAllSwitches();
+      throwIfCancelled();
+      done += 1;
+      report('switches', `Loaded ${switches.length} switches`);
+    } catch (error) {
+      if (error.cancelled) throw error;
+      console.warn('[GlobalSearch] Tenant-wide switch query failed, falling back per venue:', error.message);
+      // Replace the single switch step with one step per venue (or one no-op step).
+      const switchSteps = Math.max(venueList.length, 1);
+      total = total - 1 + switchSteps;
+      switches = [];
+      if (venueList.length === 0) {
+        done += 1;
+        report('switches', 'No venues for switch fallback');
+      } else {
+        await mapWithConcurrency(venueList, GLOBAL_SEARCH_SWITCH_CONCURRENCY, async (venue) => {
+          throwIfCancelled();
+          try {
+            const rows = await client.getSwitches(venue.id);
+            switches.push(...(rows || []));
+          } catch (venueError) {
+            console.warn(`[GlobalSearch] Switches for venue ${venue.id} failed:`, venueError.message);
+          }
+          done += 1;
+          report('switches', `Switches: ${venue.name || venue.id}`);
+        });
+      }
+    }
+
+    const floorsById = {};
+    report('floors', 'Fetching floor plans...');
+    if (venueList.length === 0) {
+      done += 1;
+      report('floors', 'No venues for floor plans');
+    } else {
+      await mapWithConcurrency(venueList, GLOBAL_SEARCH_FLOOR_CONCURRENCY, async (venue) => {
+        throwIfCancelled();
+        try {
+          const floorPlans = await client.getVenueFloorPlans(tenantId, venue.id);
+          const list = Array.isArray(floorPlans) ? floorPlans : [];
+          for (const fp of list) {
+            if (!fp || !fp.id) continue;
+            floorsById[fp.id] = {
+              name: fp.name || 'Unnamed Floor Plan',
+              venueId: venue.id
+            };
+          }
+        } catch (floorError) {
+          console.warn(`[GlobalSearch] Floor plans for venue ${venue.id} failed:`, floorError.message);
+        }
+        done += 1;
+        report('floors', `Floor plans: ${venue.name || venue.id}`);
+      });
+    }
+
+    throwIfCancelled();
+    done = total;
+    report('done', `Index ready · ${accessPoints.length} APs · ${switches.length} switches`);
+
+    return {
+      success: true,
+      data: {
+        accessPoints,
+        switches,
+        floorsById,
+        fetchedAt: Date.now()
+      },
+      cancelled: false
+    };
+  } catch (error) {
+    if (error.cancelled || (run && run.cancelled)) {
+      return { success: false, cancelled: true, error: 'Cancelled' };
+    }
+    console.error('[GlobalSearch] Index build failed:', error.message);
+    return { success: false, error: error.message, cancelled: false };
+  } finally {
+    if (run) activeGlobalSearchRuns.delete(run);
+  }
+});
+
+ipcMain.handle('cancel-global-search-index', async () => {
+  cancelRuns(activeGlobalSearchRuns);
   return { success: true };
 });
 
 // Logout
 ipcMain.handle('logout', async () => {
+  cancelRuns(activePoeRuns);
+  cancelRuns(activeGlobalSearchRuns);
   ruckusClient = null;
   return { success: true };
 });

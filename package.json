@@ -1,7 +1,7 @@
 {
   "name": "ruckus-one-ap-mapper",
   "version": "1.2.0",
-  "description": "Desktop application for visualizing Ruckus ONE access point locations on venue floor plans",
+  "description": "Desktop application for visualizing RUCKUS ONE access point locations on venue floor plans",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -12,7 +12,7 @@
     "build:dmg": "npm run prebuild && electron-builder --mac dmg --arm64 --x64",
     "build:win": "npm run prebuild && electron-builder --win --x64",
     "build:all": "npm run prebuild && electron-builder --mac dmg --arm64 --x64 && electron-builder --win --x64",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/ruckus.test.js"
   },
   "keywords": [
     "ruckus",
@@ -33,7 +33,7 @@
   },
   "build": {
     "appId": "com.ruckusoneapmapper.app",
-    "productName": "Ruckus One AP Mapper",
+    "productName": "RUCKUS One AP Mapper",
     "mac": {
       "category": "public.app-category.utilities",
       "target": [

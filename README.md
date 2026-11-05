@@ -1,4 +1,4 @@
-# Ruckus One AP Mapper
+# RUCKUS One AP Mapper
 
 Desktop app for viewing RUCKUS One access points on venue floor plans, with RF details (channel, bandwidth, transmit power) and optional PoE information.  Adds AFC power state if 6GHz is enabled.  This gives you a holistic view of all devices on a floor plan with RF info at a glance.
 
@@ -6,7 +6,7 @@ Map images, floor-plan scale, and device locations are obtained through the RUCK
 
 ## Disclaimer
 
-This is an unofficial, community-developed tool. It is **not** affiliated with, endorsed by, or officially supported by Belden Inc., Ruckus (a Belden Brand), or any of their affiliates. Use of Ruckus / Belden trademarks is for identification only.
+This is an unofficial, community-developed tool. It is **not** affiliated with, endorsed by, or officially supported by Belden Inc., RUCKUS (a Belden Brand), or any of their affiliates. Use of RUCKUS / Belden trademarks is for identification only.
 
 **Provided as-is, with no warranty of any kind.** The authors and contributors make no guarantees about fitness for a particular purpose, correctness, availability, or that use of this software will not cause issues in your environment. You use it at your own risk. The authors are not responsible for any damages, data loss, service disruption, or other consequences arising from use of this application.
 
@@ -18,21 +18,22 @@ Installers are on the **[Releases](https://github.com/MibenSmmod/Ruckus1-AP-Mapp
 
 | Platform | Download |
 |----------|----------|
-| macOS (Apple Silicon) | [Ruckus One AP Mapper-1.2.0-arm64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.2.0/Ruckus.One.AP.Mapper-1.2.0-arm64.dmg) |
-| macOS (Intel) | [Ruckus One AP Mapper-1.2.0-x64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.2.0/Ruckus.One.AP.Mapper-1.2.0-x64.dmg) |
-| Windows (x64) | [Ruckus One AP Mapper-1.2.0-Setup.exe](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.2.0/Ruckus.One.AP.Mapper-1.2.0-Setup.exe) |
+| macOS (Apple Silicon) | [RUCKUS One AP Mapper-1.2.0-arm64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.2.0/Ruckus.One.AP.Mapper-1.2.0-arm64.dmg) |
+| macOS (Intel) | [RUCKUS One AP Mapper-1.2.0-x64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.2.0/Ruckus.One.AP.Mapper-1.2.0-x64.dmg) |
+| Windows (x64) | [RUCKUS One AP Mapper-1.2.0-Setup.exe](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.2.0/Ruckus.One.AP.Mapper-1.2.0-Setup.exe) |
 
 macOS builds are signed and notarized by Apple, so they open normally. The Windows installer is signed by WLAN GEEKS LLC; Windows SmartScreen may still show a prompt for a new release until it builds download reputation.
 
 ## Features
 
-- Sign in with Ruckus ONE API credentials (region, tenant ID, client ID, client secret)
+- Sign in with RUCKUS ONE API credentials (region, tenant ID, client ID, client secret)
 - Browse venues and floor plans
 - Overlay APs on floor plan images with status and RF labels
 - Optional hostname and PoE level display
 - Search APs by hostname or serial number
 - Zoom, pan, and font-size controls
 - Click device icon for more information (IP address, MAC address, etc.)
+- Edit mode (Administrator Scope): drag APs or switches to update floor-plan coordinates in RUCKUS One
 
 ## Screenshots
 
@@ -62,8 +63,8 @@ macOS builds are signed and notarized by Apple, so they open normally. The Windo
 
 ## Requirements
 
-- A Ruckus ONE account at [https://ruckus.cloud/](https://ruckus.cloud/)
-- An Application Token (Read Only recommended) and Tenant ID
+- A RUCKUS ONE account at [https://ruckus.cloud/](https://ruckus.cloud/)
+- An Application Token and Tenant ID — **Read Only** is recommended for viewing; use **Administrator** Scope to Edit and move device locations on the map
 - For running from source: Node.js 18 or higher
 
 ## Run from source

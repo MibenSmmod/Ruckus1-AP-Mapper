@@ -60,7 +60,7 @@ async function fetchLatestRelease() {
     const response = await fetch(RELEASES_API, {
       headers: {
         Accept: 'application/vnd.github+json',
-        'User-Agent': 'Ruckus-One-AP-Mapper'
+        'User-Agent': 'RUCKUS-One-AP-Mapper'
       },
       signal: controller.signal
     });
@@ -184,13 +184,13 @@ function formatBytes(bytes) {
 async function downloadReleaseAsset(asset, onProgress) {
   const downloadsDir = app.getPath('downloads');
   const fileName = asset.name
-    || `Ruckus-One-AP-Mapper-update${path.extname(asset.browser_download_url || '')}`;
+    || `RUCKUS-One-AP-Mapper-update${path.extname(asset.browser_download_url || '')}`;
   const destination = path.join(downloadsDir, fileName);
 
   const response = await fetch(asset.browser_download_url, {
     headers: {
       Accept: 'application/octet-stream',
-      'User-Agent': 'Ruckus-One-AP-Mapper'
+      'User-Agent': 'RUCKUS-One-AP-Mapper'
     },
     redirect: 'follow'
   });
@@ -318,7 +318,7 @@ async function promptAndInstall(updateInfo) {
       : 'Installer ready.',
     detail: openFailed
       ? `Saved to:\n${filePath}\n\nOpen that file to install, then restart the app.\n\n${openResult}`
-      : `Saved to:\n${filePath}\n\nFinish the installer, then restart Ruckus One AP Mapper.`,
+      : `Saved to:\n${filePath}\n\nFinish the installer, then restart RUCKUS One AP Mapper.`,
     buttons: ['OK'],
     noLink: true
   });
@@ -375,7 +375,7 @@ async function checkForUpdates({ silent = false, retries = 1 } = {}) {
           type: 'info',
           title: 'No Updates',
           message: 'You are up to date.',
-          detail: `Ruckus One AP Mapper ${currentVersion} is the latest version.`,
+          detail: `RUCKUS One AP Mapper ${currentVersion} is the latest version.`,
           buttons: ['OK'],
           noLink: true
         });

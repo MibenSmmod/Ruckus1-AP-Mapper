@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
-  <title>Ruckus One AP Mapper</title>
+  <title>RUCKUS One AP Mapper</title>
   <script src="theme-boot.js"></script>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -13,7 +13,7 @@
     <!-- Login Screen -->
     <div id="login-screen" class="screen active">
       <div class="login-container">
-        <h1>Ruckus One AP Mapper</h1>
+        <h1>RUCKUS One AP Mapper</h1>
         <p class="subtitle">Enter API info to access your R1 account</p>
         <p class="example-link-row">
           <button type="button" id="view-example-btn" class="link-button">See an example map</button>
@@ -77,7 +77,7 @@
 
             <p>You can get this information using <strong>R1 &gt; Venues &gt; Choose Venue &gt; Overview</strong> tab, but you must click each AP to get the data. With high-density floor plans, this app helps you search and find APs or switches by hostname, serial number, MAC address, or IP address quickly.</p>
 
-            <p>Written by Mike Rieben, Ruckus Systems Engineer October 2026 and will be provided open source on my github page: <a href="https://github.com/MibenSmmod/Ruckus1-AP-Mapper/" target="_blank" rel="noopener noreferrer">https://github.com/MibenSmmod/Ruckus1-AP-Mapper/</a>. Connect with me on LinkedIn: <a href="https://www.linkedin.com/in/mikerieben/" target="_blank" rel="noopener noreferrer">https://www.linkedin.com/in/mikerieben/</a></p>
+            <p>Written by Mike Rieben, RUCKUS Systems Engineer October 2026 and will be provided open source on my github page: <a href="https://github.com/MibenSmmod/Ruckus1-AP-Mapper/" target="_blank" rel="noopener noreferrer">https://github.com/MibenSmmod/Ruckus1-AP-Mapper/</a>. Connect with me on LinkedIn: <a href="https://www.linkedin.com/in/mikerieben/" target="_blank" rel="noopener noreferrer">https://www.linkedin.com/in/mikerieben/</a></p>
           </div>
         </details>
 
@@ -90,8 +90,8 @@
               <li>Menu: <strong>Administration</strong> &gt; <strong>Account Management</strong> &gt; <strong>Settings</strong></li>
               <li>Scroll down to <strong>Application Tokens</strong></li>
               <li>Click <strong>Add Token</strong> link (far right)</li>
-              <li>Enter a name (e.g., "Ruckus One AP Mapper")</li>
-              <li>Scope: select <strong>Read Only</strong>(Recommended)</li>
+              <li>Enter a name (e.g., "RUCKUS One AP Mapper")</li>
+              <li>Scope: select <strong>Read Only</strong> (Recommended for viewing). Use <strong>Administrator</strong> Scope if you need to Edit and move device locations on the map (writes coordinates back to RUCKUS One).</li>
               <li>Press <strong>Add</strong> button</li>
               <li>Copy the <strong>Client ID</strong> and <strong>Shared Secret</strong></li>
             </ol>
@@ -110,7 +110,7 @@
             <summary>Disclaimer & Terms of Use</summary>
             <div class="disclaimer-content">
               <p><strong>Unofficial Application</strong></p>
-              <p>This application is an unofficial, community-developed tool and is not affiliated with, endorsed by, or associated with Belden Inc., Ruckus a Belden Brand, or any of their subsidiaries. "Ruckus," "Ruckus One," and related product names are trademarks of their respective owners.</p>
+              <p>This application is an unofficial, community-developed tool and is not affiliated with, endorsed by, or associated with Belden Inc., RUCKUS a Belden Brand, or any of their subsidiaries. "RUCKUS," "RUCKUS One," and related product names are trademarks of their respective owners.</p>
 
               <p><strong>No Warranty</strong></p>
               <p>This application is provided "AS IS" without warranty of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, and noninfringement. The authors and contributors make no representation or warranty that the application will meet your requirements or operate uninterrupted or error-free.</p>
@@ -131,7 +131,16 @@
     <!-- Venue Selection Screen -->
     <div id="venue-screen" class="screen">
       <div class="header">
-        <h2>Select Venue</h2>
+        <button type="button" id="global-search-btn" class="btn secondary global-search-btn" title="Global Search for Device" aria-label="Global Search for Device">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.75"/>
+            <path d="M10 10l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+          </svg>
+          <span>Global Search for Device</span>
+        </button>
+        <div class="header-title-block">
+          <h2>Select Venue</h2>
+        </div>
         <button id="logout-btn" class="btn secondary">Logout</button>
       </div>
 
@@ -225,9 +234,20 @@
         <!--
           Floating map controls: DOM order matches visual left→right / top→bottom
           so Tab does not jump as panels were added over time.
-          Top: Search, Filter | PoE, Settings, Refresh, Export
+          Top: Getting Started, Search, Filter | Edit, PoE, Settings, Refresh, Export
           Bottom: Legend | Opacity, Font, Zoom
         -->
+        <div class="floating-getting-started-panel">
+          <button id="getting-started-btn" class="getting-started-icon-btn" title="Getting Started" aria-label="Getting Started">
+            <svg class="getting-started-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                d="M9 5h11M9 12h11M9 19h11"/>
+              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                d="M4 5.5l1.2 1.2L7.5 4.5M4 12.5l1.2 1.2L7.5 11.5M4 19.5l1.2 1.2L7.5 18.5"/>
+            </svg>
+          </button>
+        </div>
+
         <div class="floating-search-panel">
           <button id="ap-search-toggle" class="search-icon-btn" title="Search devices (/)" aria-label="Search devices (/)">🔍</button>
           <div id="ap-search-popup" class="ap-search-popup hidden">
@@ -267,6 +287,7 @@
               <div class="map-filter-options" id="filter-band-options">
                 <label class="map-filter-option"><input type="radio" name="filter-band" value="all" checked> All</label>
                 <label class="map-filter-option"><input type="radio" name="filter-band" value="6ghz"> 6GHz enabled</label>
+                <label class="map-filter-option"><input type="radio" name="filter-band" value="no6ghz"> 6GHz disabled</label>
               </div>
             </div>
 
@@ -286,6 +307,16 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <div class="floating-edit-panel">
+          <button id="edit-mode-btn" class="edit-icon-btn" title="Edit device locations (requires Administrator Scope)" aria-label="Edit device locations" aria-pressed="false">
+            <svg class="edit-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+            </svg>
+            <span id="edit-unplaced-badge" class="edit-unplaced-badge hidden" aria-hidden="true"></span>
+          </button>
         </div>
 
         <div class="floating-poe-panel">
@@ -308,6 +339,20 @@
             </svg>
           </button>
         </div>
+
+        <div id="edit-mode-banner" class="edit-mode-banner hidden" role="status">
+          <span class="edit-mode-banner-text">Edit mode: drag a device to move it. Drop to save to RUCKUS One. Esc cancels a drag. Requires Administrator Scope.</span>
+          <button type="button" id="edit-mode-banner-dismiss" class="edit-mode-banner-dismiss" title="Dismiss" aria-label="Dismiss edit mode message">×</button>
+        </div>
+
+        <aside id="unplaced-devices-panel" class="unplaced-devices-panel hidden" aria-label="Unplaced devices">
+          <div class="unplaced-devices-header">
+            <span id="unplaced-devices-title" class="unplaced-devices-title">Unplaced Devices (0)</span>
+            <button type="button" id="unplaced-devices-dismiss" class="unplaced-devices-dismiss" title="Hide panel" aria-label="Hide unplaced devices panel">×</button>
+          </div>
+          <input type="search" id="unplaced-devices-search" class="unplaced-devices-search" placeholder="Search..." autocomplete="off" spellcheck="false" />
+          <div id="unplaced-devices-list" class="unplaced-devices-list"></div>
+        </aside>
 
         <div class="floating-settings-panel">
           <button id="settings-btn" class="settings-icon-btn" title="Settings">⚙</button>
@@ -588,9 +633,9 @@
           <h2>Example Floor Plan View</h2>
           <button type="button" id="close-example-btn" class="example-close-btn" aria-label="Close example">&times;</button>
         </div>
-        <p class="example-modal-desc">Access points with RF details (channel / bandwidth / Tx power), optional PoE info, and switches on a venue floor plan.</p>
+        <p class="example-modal-desc">Access points with RF details (channel / bandwidth / Tx power / clients), LLDP neighbor and PoE info, and switches with PoE budget on a venue floor plan.</p>
         <div class="example-image-wrap">
-          <img src="assets/example-map.jpg" alt="Example Ruckus One AP Mapper floor plan with access points and RF overlays">
+          <img src="assets/example-map.jpg" alt="Example RUCKUS One AP Mapper floor plan with access points and RF overlays">
         </div>
         <div class="modal-buttons">
           <button type="button" id="example-back-btn" class="btn primary">Back to Login</button>
@@ -668,7 +713,10 @@
     <!-- SSH Confirmation Modal -->
     <div id="ssh-confirmation-modal" class="modal hidden">
       <div class="modal-content">
-        <h2>Query PoE &amp; LLDP from R1</h2>
+        <div class="example-modal-header">
+          <h2>Query PoE &amp; LLDP from R1</h2>
+          <button type="button" id="ssh-close-btn" class="example-close-btn" aria-label="Close PoE confirmation">&times;</button>
+        </div>
         <p>PoE is read from the RUCKUS One cloud API. No SSH session to the access points is opened.</p>
         <div class="info-box">
           <strong>What will happen:</strong>
@@ -682,6 +730,113 @@
         <div class="modal-buttons">
           <button id="ssh-confirm-btn" class="btn primary">Query PoE &amp; LLDP</button>
           <button id="ssh-cancel-btn" class="btn secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Getting Started Modal (FR#20) -->
+    <div id="getting-started-modal" class="modal hidden">
+      <div class="modal-content getting-started-modal-content">
+        <div class="example-modal-header">
+          <h2>Getting Started</h2>
+          <button type="button" id="close-getting-started-btn" class="example-close-btn" aria-label="Close Getting Started">&times;</button>
+        </div>
+        <p class="getting-started-intro">Try these on the map screen. Check items off as you go.</p>
+        <ul class="getting-started-checklist" id="getting-started-checklist">
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="hover-cci">
+              <span>Hover an AP for co-channel (CCI) highlights</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="click-device">
+              <span>Click a device for AP/Switch details</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="switch-floors">
+              <span>Switch floors via the floor name dropdown</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="search-device">
+              <span>Search by Hostname, Serial, MAC, or IP</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="filter-devices">
+              <span>Filter to hide devices and focus the floor</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="edit-mode">
+              <span>Edit mode: move a device on the map</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="query-poe-lldp">
+              <span>Query PoE and LLDP to acquire data for each AP</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="poe-budget-rollup">
+              <span>PoE Budget Rollup (usage, missing LLDP, underpowered)</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="settings-labels">
+              <span>Settings show/hide labels for dense floors</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="refresh-api">
+              <span>Refresh API Calls</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="export-map">
+              <span>Export PNG/PDF</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="collapse-legend">
+              <span>Collapse the Legend</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="map-controls">
+              <span>Lower-right: Opacity, Font Size, Zoom</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="mouse-pan-zoom">
+              <span>Mouse scroll/zoom and click-drag pan</span>
+            </label>
+          </li>
+          <li>
+            <label class="getting-started-item">
+              <input type="checkbox" data-gs-id="keyboard-shortcuts">
+              <span>Keyboard Shortcuts in the Help menu</span>
+            </label>
+          </li>
+        </ul>
+        <div class="modal-buttons getting-started-modal-buttons">
+          <button type="button" id="getting-started-reset-btn" class="btn secondary">Reset progress</button>
+          <button type="button" id="getting-started-done-btn" class="btn primary">Done</button>
         </div>
       </div>
     </div>
@@ -706,6 +861,35 @@
         </table>
         <div class="modal-buttons">
           <button type="button" id="shortcuts-done-btn" class="btn primary">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Global Search Modal (FR#17) -->
+    <div id="global-search-modal" class="modal hidden">
+      <div class="modal-content global-search-modal-content">
+        <div class="example-modal-header">
+          <h2>Global Search for Device</h2>
+          <button type="button" id="global-search-close" class="example-close-btn" aria-label="Close global search">&times;</button>
+        </div>
+        <p class="global-search-intro">Search all venues by hostname, serial, MAC, or IP. Results include a jump link to the device on its floor plan.</p>
+        <form id="global-search-form" class="global-search-form">
+          <input type="text" id="global-search-input" class="global-search-input" placeholder="Hostname, serial, MAC, or IP" autocomplete="off" spellcheck="false" />
+          <button type="submit" id="global-search-submit" class="btn primary">Search</button>
+          <button type="button" id="global-search-refresh" class="btn secondary" title="Rebuild device index" disabled>Refresh</button>
+        </form>
+        <div id="global-search-progress" class="global-search-progress hidden">
+          <div class="progress-container">
+            <div class="progress-bar">
+              <div id="global-search-progress-fill" class="progress-fill"></div>
+            </div>
+            <div id="global-search-progress-text" class="progress-text">Preparing…</div>
+          </div>
+        </div>
+        <div id="global-search-status" class="global-search-status"></div>
+        <div id="global-search-results" class="global-search-results" role="list"></div>
+        <div class="modal-buttons">
+          <button type="button" id="global-search-cancel" class="btn secondary">Cancel</button>
         </div>
       </div>
     </div>

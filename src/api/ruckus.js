@@ -1,5 +1,15 @@
 const https = require('https');
 
+// Shown when RUCKUS One returns HTTP 429 (token-bucket rate limit, ~2000 calls/min per tenant).
+const RATE_LIMIT_USER_MESSAGE =
+  'Rate limit reached (HTTP 429). RUCKUS One temporarily blocked API calls because this tenant exceeded its request quota (about 2,000 calls per minute). Wait about a minute and try again. Large PoE & LLDP queries are a common cause.';
+
+function rateLimitError() {
+  const error = new Error(RATE_LIMIT_USER_MESSAGE);
+  error.statusCode = 429;
+  return error;
+}
+
 // Regional API endpoints
 // Both auth and API use api.{region}.ruckus.cloud
 const REGIONS = {
@@ -45,9 +55,19 @@ class RuckusAPI {
           // Check if response is binary (image)
           const contentType = res.headers['content-type'] || '';
 
-          // Handle redirects as errors for API calls
-          if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
-            reject(new Error(`Authentication failed (HTTP ${res.statusCode}). Please check your Region, Tenant ID, Client ID, and Client Secret.`));
+          // Redirects are never expected from JSON API calls. On the token
+          // endpoint they almost always mean a wrong region or tenant.
+          if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+            const error = String(options.path || '').startsWith('/oauth2/')
+              ? new Error(`Authentication failed (HTTP ${res.statusCode}). Please check your Region, Tenant ID, Client ID, and Client Secret.`)
+              : new Error(`Unexpected redirect (HTTP ${res.statusCode}) from ${options.method} ${options.path}`);
+            error.statusCode = res.statusCode;
+            reject(error);
+            return;
+          }
+
+          if (res.statusCode === 429) {
+            reject(rateLimitError());
             return;
           }
 
@@ -72,13 +92,19 @@ class RuckusAPI {
             } catch (e) {
               if (data && data.length < 500) errorMessage += `: ${data}`;
             }
-            reject(new Error(errorMessage));
+            const error = new Error(errorMessage);
+            error.statusCode = res.statusCode;
+            reject(error);
           }
         });
       });
 
+      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        req.destroy(timeoutError());
+      });
+
       req.on('error', (error) => {
-        reject(error);
+        reject(friendlyNetworkError(error, options.hostname));
       });
 
       if (postData) {
@@ -89,34 +115,9 @@ class RuckusAPI {
     });
   }
 
-  // Make binary HTTPS request (for images)
-  _requestBinary(options) {
-    return new Promise((resolve, reject) => {
-      const req = https.request(options, (res) => {
-        const chunks = [];
-
-        res.on('data', (chunk) => {
-          chunks.push(chunk);
-        });
-
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            const buffer = Buffer.concat(chunks);
-            const contentType = res.headers['content-type'] || 'image/png';
-            const base64 = buffer.toString('base64');
-            resolve(`data:${contentType};base64,${base64}`);
-          } else {
-            reject(new Error(`HTTP ${res.statusCode}`));
-          }
-        });
-      });
-
-      req.on('error', (error) => {
-        reject(error);
-      });
-
-      req.end();
-    });
+  // _request with the same 429 backoff apiCall uses (1s, 2s, 4s).
+  async _send(options, postData = null) {
+    return withRateLimitRetry(() => this._request(options, postData));
   }
 
   // Check if token needs refresh
@@ -138,7 +139,7 @@ class RuckusAPI {
     }
   }
 
-  // Authenticate with Ruckus ONE
+  // Authenticate with RUCKUS ONE
   async authenticate(tenantId, clientId, clientSecret) {
     this.tenantId = tenantId;
     this.clientId = clientId;
@@ -157,9 +158,14 @@ class RuckusAPI {
       }
     };
 
-    const response = await this._request(options, postData);
+    let response;
+    try {
+      response = await this._send(options, postData);
+    } catch (error) {
+      throw authFailureError(error);
+    }
 
-    if (!response.access_token) {
+    if (!response || !response.access_token) {
       throw new Error('Authentication failed: No access token received');
     }
 
@@ -187,7 +193,7 @@ class RuckusAPI {
       }
     };
 
-    return await this._request(options);
+    return await this._send(options);
   }
 
   // Get floor plans for a venue
@@ -206,7 +212,7 @@ class RuckusAPI {
       }
     };
 
-    return await this._request(options);
+    return await this._send(options);
   }
 
   // Get floor plan image using imageId from floor plan data
@@ -229,28 +235,26 @@ class RuckusAPI {
     return await this._requestBinaryWithRedirect(options);
   }
 
-  // Make binary request that follows redirects
+  // Make binary request that follows redirects (the file API usually
+  // redirects to cloud storage). TLS is always verified; only https
+  // redirects are followed, and auth headers stay on the original host.
   _requestBinaryWithRedirect(options, maxRedirects = 3) {
     return new Promise((resolve, reject) => {
       const makeRequest = (opts, redirectCount) => {
         const req = https.request(opts, (res) => {
-          // Handle redirect
-          if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) && res.headers.location) {
+          if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+            res.resume();
             if (redirectCount >= maxRedirects) {
               reject(new Error('Too many redirects'));
               return;
             }
-            const redirectUrl = new URL(res.headers.location);
-            const newOpts = {
-              hostname: redirectUrl.hostname,
-              port: 443,
-              path: redirectUrl.pathname + redirectUrl.search,
-              method: 'GET',
-              rejectUnauthorized: false, // Allow cloud storage certs
-              headers: {
-                'Accept': 'image/*'
-              }
-            };
+            let newOpts;
+            try {
+              newOpts = imageRedirectOptions(res.headers.location, opts, options);
+            } catch (error) {
+              reject(error);
+              return;
+            }
             makeRequest(newOpts, redirectCount + 1);
             return;
           }
@@ -258,48 +262,34 @@ class RuckusAPI {
           const chunks = [];
           res.on('data', (chunk) => chunks.push(chunk));
           res.on('end', () => {
+            if (res.statusCode === 429) {
+              reject(rateLimitError());
+              return;
+            }
             if (res.statusCode >= 200 && res.statusCode < 300) {
               const buffer = Buffer.concat(chunks);
               const contentType = res.headers['content-type'] || 'image/png';
               const base64 = buffer.toString('base64');
               resolve(`data:${contentType};base64,${base64}`);
             } else {
-              reject(new Error(`HTTP ${res.statusCode}`));
+              const error = new Error(`HTTP ${res.statusCode}`);
+              error.statusCode = res.statusCode;
+              reject(error);
             }
           });
         });
-        req.on('error', reject);
+        req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+          req.destroy(timeoutError());
+        });
+        req.on('error', (error) => reject(friendlyNetworkError(error, opts.hostname)));
         req.end();
       };
       makeRequest(options, 0);
     });
   }
 
-  // Query inventory with custom filter/body
-  async queryInventory(tenantId, body) {
-    await this._ensureAuthenticated();
-
-    const postData = JSON.stringify(body);
-
-    const options = {
-      hostname: this.endpoints.api,
-      port: 443,
-      path: '/tenants/inventories/query',
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.accessToken}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData),
-        'x-rks-tenantid': tenantId
-      }
-    };
-
-    return await this._request(options, postData);
-  }
-
-  // Get access points (all APs, then filter by venue)
-  async getAccessPoints(tenantId, venueId) {
+  // All tenant APs (placement + identity). No radio/client enrichment.
+  async getAllAccessPoints(tenantId) {
     await this._ensureAuthenticated();
 
     const options = {
@@ -314,12 +304,14 @@ class RuckusAPI {
       }
     };
 
-    const allAPs = await this._request(options);
-    // Filter APs by venue ID
-    if (Array.isArray(allAPs)) {
-      return allAPs.filter(ap => ap.venueId === venueId);
-    }
-    return allAPs;
+    const allAPs = await this._send(options);
+    return Array.isArray(allAPs) ? allAPs : [];
+  }
+
+  // Get access points (all APs, then filter by venue)
+  async getAccessPoints(tenantId, venueId) {
+    const allAPs = await this.getAllAccessPoints(tenantId);
+    return allAPs.filter(ap => ap.venueId === venueId);
   }
 
   // JSON API call. Uses the RUCKUS One v1 media type the PoE endpoints expect.
@@ -345,18 +337,7 @@ class RuckusAPI {
       headers
     };
 
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        return await this._requestJson(options, postData);
-      } catch (error) {
-        if (error.statusCode === 429 && attempt < 3) {
-          await delay(2 ** attempt * 1000);
-          continue;
-        }
-        throw error;
-      }
-    }
-    return null;
+    return withRateLimitRetry(() => this._requestJson(options, postData));
   }
 
   _requestJson(options, postData = null) {
@@ -368,9 +349,7 @@ class RuckusAPI {
         });
         res.on('end', () => {
           if (res.statusCode === 429) {
-            const error = new Error('HTTP 429');
-            error.statusCode = 429;
-            reject(error);
+            reject(rateLimitError());
             return;
           }
           if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -394,10 +373,10 @@ class RuckusAPI {
         });
       });
 
-      req.setTimeout(60000, () => {
-        req.destroy(new Error(`${options.method} ${options.path} timed out`));
+      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        req.destroy(timeoutError());
       });
-      req.on('error', reject);
+      req.on('error', (error) => reject(friendlyNetworkError(error, options.hostname)));
       if (postData) req.write(postData);
       req.end();
     });
@@ -424,32 +403,46 @@ class RuckusAPI {
     );
   }
 
+  // ICX switches: identity, placement, status. Optional venue filter.
+  static get SWITCH_QUERY_FIELDS() {
+    return [
+      'id',
+      'switchName',
+      'name',
+      'provisionName',
+      'deviceStatus',
+      'floorplanId',
+      'xPercent',
+      'yPercent',
+      'venueId',
+      'isStack',
+      'deviceType',
+      'model',
+      'switchMac',
+      'ipAddress',
+      'uptime',
+      'alerts',
+      'clientCount',
+      'poeUtilization',
+      'poeTotal',
+      'poeFree'
+    ];
+  }
+
+  // Prefer tenant-wide (no venue filter) for global search.
+  async getAllSwitches() {
+    return this.queryAll(
+      '/venues/switches/query',
+      RuckusAPI.SWITCH_QUERY_FIELDS,
+      null
+    );
+  }
+
   // ICX switches for a venue, including floor-plan placement and status.
   async getSwitches(venueId) {
     return this.queryAll(
       '/venues/switches/query',
-      [
-        'id',
-        'switchName',
-        'name',
-        'provisionName',
-        'deviceStatus',
-        'floorplanId',
-        'xPercent',
-        'yPercent',
-        'venueId',
-        'isStack',
-        'deviceType',
-        'model',
-        'switchMac',
-        'ipAddress',
-        'uptime',
-        'alerts',
-        'clientCount',
-        'poeUtilization',
-        'poeTotal',
-        'poeFree'
-      ],
+      RuckusAPI.SWITCH_QUERY_FIELDS,
       { venueId: [venueId] }
     );
   }
@@ -464,8 +457,16 @@ class RuckusAPI {
       const resp = await this.apiCall('POST', path, body) || {};
       const data = Array.isArray(resp.data) ? resp.data : [];
       rows.push(...data);
-      const total = resp.totalCount != null ? resp.totalCount : rows.length;
-      if (!data.length || rows.length >= total) return rows;
+      if (!data.length) return rows;
+      // Without totalCount, a short page means the last page.
+      const done = resp.totalCount != null
+        ? rows.length >= resp.totalCount
+        : data.length < PAGE_SIZE;
+      if (done) return rows;
+      if (page >= MAX_QUERY_PAGES) {
+        console.warn(`[API] ${path} stopped after ${MAX_QUERY_PAGES} pages (${rows.length} rows)`);
+        return rows;
+      }
       page += 1;
     }
   }
@@ -498,6 +499,9 @@ class RuckusAPI {
     if (shouldCancel()) return poeResultsForAps(list, {}, portIndex);
 
     const neighborsBySerial = {};
+    // APs whose firmware can't refresh LLDP on request (WIFI-10496). Their
+    // last reported neighbors are still read below.
+    const refreshUnsupported = new Set();
     if (refresh && operational.length && !shouldCancel()) {
       for (let i = 0; i < operational.length; i++) {
         if (shouldCancel()) break;
@@ -515,7 +519,12 @@ class RuckusAPI {
             { status: 'CURRENT', type: 'LLDP_NEIGHBOR' }
           );
         } catch (error) {
-          console.warn(`[PoE] LLDP refresh failed for ${ap.name || ap.serialNumber}:`, error.message);
+          if (isFirmwareUnsupportedError(error)) {
+            refreshUnsupported.add(ap.serialNumber);
+            console.warn(`[PoE] ${ap.name || ap.serialNumber}: AP firmware does not support an LLDP refresh (WIFI-10496); using its last reported LLDP neighbors.`);
+          } else {
+            console.warn(`[PoE] LLDP refresh failed for ${ap.name || ap.serialNumber}:`, error.message);
+          }
         }
       }
 
@@ -528,7 +537,7 @@ class RuckusAPI {
             `${remaining}s remaining`
           );
         });
-        if (!finished) return poeResultsForAps(list, neighborsBySerial, portIndex);
+        if (!finished) return poeResultsForAps(list, neighborsBySerial, portIndex, { refreshUnsupported });
       }
     }
 
@@ -559,12 +568,138 @@ class RuckusAPI {
     }
 
     report(100, 'Complete', '');
-    return poeResultsForAps(list, neighborsBySerial, portIndex);
+    return poeResultsForAps(list, neighborsBySerial, portIndex, { refreshUnsupported });
+  }
+
+  // --- FR#18: floor-plan placement writes (allowlisted PUT only) ---
+
+  _assertPlacementWritePath(method, path) {
+    if (method !== 'PUT') {
+      throw new Error('Placement write refused: only PUT is allowed');
+    }
+    if (typeof path !== 'string' || !(AP_FLOOR_POSITION_PATH.test(path) || SWITCH_POSITION_PATH.test(path))) {
+      throw new Error('Placement write refused: path is not an allowlisted floor-position endpoint');
+    }
+  }
+
+  _sanitizeApPositionBody(body) {
+    if (!body || typeof body !== 'object') {
+      throw new Error('Placement write refused: invalid AP position body');
+    }
+    const keys = Object.keys(body);
+    if (keys.length !== 2 || !keys.includes('xPercent') || !keys.includes('yPercent')) {
+      throw new Error('Placement write refused: AP body may only include xPercent and yPercent');
+    }
+    return {
+      xPercent: clampPercent(body.xPercent),
+      yPercent: clampPercent(body.yPercent)
+    };
+  }
+
+  _sanitizeSwitchPositionBody(body) {
+    if (!body || typeof body !== 'object') {
+      throw new Error('Placement write refused: invalid switch position body');
+    }
+    const keys = Object.keys(body);
+    if (
+      keys.length !== 3 ||
+      !keys.includes('floorPlanId') ||
+      !keys.includes('xPercent') ||
+      !keys.includes('yPercent')
+    ) {
+      throw new Error('Placement write refused: switch body may only include floorPlanId, xPercent, and yPercent');
+    }
+    if (!body.floorPlanId || typeof body.floorPlanId !== 'string') {
+      throw new Error('Placement write refused: floorPlanId is required');
+    }
+    return {
+      floorPlanId: body.floorPlanId,
+      xPercent: clampPercent(body.xPercent),
+      yPercent: clampPercent(body.yPercent)
+    };
+  }
+
+  // Private gate: only the two allowlisted position PUTs may proceed.
+  async _placementWrite(method, path, body) {
+    this._assertPlacementWritePath(method, path);
+    let sanitized;
+    if (AP_FLOOR_POSITION_PATH.test(path)) {
+      sanitized = this._sanitizeApPositionBody(body);
+    } else {
+      sanitized = this._sanitizeSwitchPositionBody(body);
+    }
+    return this.apiCall(method, path, sanitized);
+  }
+
+  async updateApFloorPosition({ venueId, floorPlanId, serialNumber, xPercent, yPercent }) {
+    if (!venueId || !floorPlanId || !serialNumber) {
+      throw new Error('venueId, floorPlanId, and serialNumber are required');
+    }
+    const path =
+      `/venues/${encodeURIComponent(venueId)}` +
+      `/floorplans/${encodeURIComponent(floorPlanId)}` +
+      `/aps/${encodeURIComponent(serialNumber)}/floorPositions`;
+    return this._placementWrite('PUT', path, { xPercent, yPercent });
+  }
+
+  async updateSwitchPosition({ venueId, switchId, floorPlanId, xPercent, yPercent }) {
+    if (!venueId || !switchId || !floorPlanId) {
+      throw new Error('venueId, switchId, and floorPlanId are required');
+    }
+    const path =
+      `/venues/${encodeURIComponent(venueId)}` +
+      `/switches/${encodeURIComponent(switchId)}/positions`;
+    return this._placementWrite('PUT', path, { floorPlanId, xPercent, yPercent });
+  }
+
+  // Probe write scope without moving the device: re-write a device's current
+  // position on this floor (a no-op move). 2xx → writable, 403 → Read Only.
+  // Coordinates must already be valid; they are never clamped, so a bad probe
+  // is refused locally instead of turning into a real move.
+  async probePlacementWriteAccess({ type, venueId, floorPlanId, deviceId, xPercent, yPercent }) {
+    if (!venueId || !floorPlanId || !deviceId) {
+      throw new Error('venueId, floorPlanId, and deviceId are required to probe write access');
+    }
+    if (!isValidPercent(xPercent) || !isValidPercent(yPercent)) {
+      throw new Error('Probe refused: the device\'s current xPercent/yPercent (0–100) are required');
+    }
+    try {
+      if (type === 'switch') {
+        await this.updateSwitchPosition({ venueId, switchId: deviceId, floorPlanId, xPercent, yPercent });
+      } else {
+        await this.updateApFloorPosition({ venueId, floorPlanId, serialNumber: deviceId, xPercent, yPercent });
+      }
+      return { canWrite: true };
+    } catch (error) {
+      if (error.statusCode === 403) return { canWrite: false, statusCode: 403 };
+      throw error;
+    }
   }
 }
 
 const V1_ACCEPT = 'application/vnd.ruckus.v1+json';
 const PAGE_SIZE = 500;
+// Safety stop for queryAll if an endpoint ignores `page` (500 × 200 = 100k rows).
+const MAX_QUERY_PAGES = 200;
+const REQUEST_TIMEOUT_MS = 60000;
+
+// FR#18 allowlist — the only R1 paths permitted for map placement writes.
+const AP_FLOOR_POSITION_PATH =
+  /^\/venues\/[^/]+\/floorplans\/[^/]+\/aps\/[^/]+\/floorPositions$/;
+const SWITCH_POSITION_PATH =
+  /^\/venues\/[^/]+\/switches\/[^/]+\/positions$/;
+
+function clampPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    throw new Error('Placement write refused: xPercent/yPercent must be a number');
+  }
+  return Math.min(100, Math.max(0, n));
+}
+
+function isValidPercent(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
+}
 const PORT_FIELDS = [
   'switchName', 'switchSerial', 'switchUnitId', 'portIdentifier', 'name',
   'status', 'poeEnabled', 'poeType', 'poeUsed', 'poeTotal', 'poeUsage',
@@ -574,6 +709,85 @@ const PORT_ID_RE = /(\d+\/\d+\/\d+)/;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Retry HTTP 429 with exponential backoff (1s, 2s, 4s), then surface the
+// user-facing rate-limit message.
+async function withRateLimitRetry(send, retryDelay = delay) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await send();
+    } catch (error) {
+      if (error.statusCode !== 429) throw error;
+      if (attempt >= 3) throw rateLimitError();
+      await retryDelay(2 ** attempt * 1000);
+    }
+  }
+}
+
+// Plain-language error for DNS / connection failures (offline, wrong network,
+// VPN/proxy). Other errors pass through unchanged.
+const NETWORK_ERROR_CODES = new Set([
+  'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH'
+]);
+
+// Timeouts are reported like other network failures, without the request
+// path (which can include the Tenant ID).
+function timeoutError() {
+  return Object.assign(new Error('Request timed out'), { code: 'ETIMEDOUT' });
+}
+
+function friendlyNetworkError(error, hostname) {
+  if (!error || !NETWORK_ERROR_CODES.has(error.code)) return error;
+  const friendly = new Error(
+    `Cannot reach ${hostname} (${error.code}). Check your network connection and the selected Region.`
+  );
+  friendly.code = error.code;
+  return friendly;
+}
+
+// Turn an HTTP error from the OAuth token endpoint into a message a user can
+// act on. Network errors, timeouts and rate limits keep their own messages.
+function authFailureError(error) {
+  const status = error && error.statusCode;
+  if (!status || status === 429) return error;
+  let message;
+  if (status === 400 || status === 401) {
+    message = 'Sign-in failed: RUCKUS One did not accept this Client ID and Client Secret. ' +
+      'Copy both again from the Application Token in RUCKUS One, and check that the Tenant ID and Region belong to the same account.';
+  } else if (status === 403) {
+    message = 'Sign-in refused: the Application Token is not allowed to access this tenant. ' +
+      'Check the Tenant ID, and that the token has not been revoked or disabled.';
+  } else if (status === 404) {
+    message = 'Sign-in failed: no tenant with this Tenant ID was found in the selected Region. Check the Tenant ID and Region.';
+  } else if ([301, 302, 303, 307, 308].includes(status)) {
+    message = 'Sign-in failed: RUCKUS One redirected the request, which usually means the wrong Region or Tenant ID.';
+  } else if (status >= 500) {
+    message = 'RUCKUS One sign-in is not responding correctly right now. Wait a minute and try again.';
+  } else {
+    message = 'Sign-in failed. Check your Region, Tenant ID, Client ID, and Client Secret.';
+  }
+  const friendly = new Error(`${message} (HTTP ${status})`);
+  friendly.statusCode = status;
+  return friendly;
+}
+
+// Request options for following a floor-plan image redirect. Only https is
+// allowed. The original headers (Authorization) are kept only when the
+// redirect stays on the original API host.
+function imageRedirectOptions(location, currentOpts, originalOpts) {
+  const url = new URL(location, `https://${currentOpts.hostname}`);
+  if (url.protocol !== 'https:') {
+    throw new Error(`Refusing non-HTTPS floor plan image redirect to ${url.host}`);
+  }
+  const sameHost = url.hostname === originalOpts.hostname;
+  return {
+    hostname: url.hostname,
+    port: url.port ? Number(url.port) : 443,
+    path: url.pathname + url.search,
+    method: 'GET',
+    headers: sameHost ? { ...originalOpts.headers } : { Accept: 'image/*' }
+  };
 }
 
 async function waitWithProgress(ms, shouldCancel, onTick) {
@@ -749,7 +963,7 @@ function wattsFromMw(mw) {
 function formatWatts(mw) {
   const watts = wattsFromMw(mw);
   if (watts == null) return null;
-  return Number.isInteger(watts) ? String(watts) : String(watts);
+  return String(watts);
 }
 
 function standardRank(standard) {
@@ -868,21 +1082,28 @@ function formatPoeLabel(lldp, port) {
   return negotiated || null;
 }
 
-function labelForAp(ap, neighbors, port) {
+// WIFI-10496: the AP's firmware doesn't support the requested operation.
+function isFirmwareUnsupportedError(error) {
+  return /WIFI-10496|firmware is not supported/i.test(String(error && error.message || ''));
+}
+
+function labelForAp(ap, neighbors, port, { refreshUnsupported = false } = {}) {
   const lldp = pickPseNeighbor(neighbors);
   const text = formatPoeLabel(lldp, port);
   if (text) return text;
   if (!isOperational(ap)) return 'error:Offline';
   if (port && isExplicitlyFalse(port.poeEnabled)) return 'error:PoE disabled';
-  if (!neighbors || !neighbors.length) return 'error:No LLDP';
+  if (!neighbors || !neighbors.length) {
+    return refreshUnsupported ? 'error:No LLDP (AP firmware)' : 'error:No LLDP';
+  }
   return 'error:No PoE data';
 }
 
 // Structured PoE row for rollups (FR#4). Map labels stay in `label`.
-function detailForAp(ap, neighbors, port) {
-  const mac = String(ap.mac || ap.macAddress || '').toLowerCase();
+function detailForAp(ap, neighbors, port, { refreshUnsupported = false } = {}) {
+  const mac = poeResultKey(ap);
   const lldp = pickPseNeighbor(neighbors);
-  const label = labelForAp(ap, neighbors, port);
+  const label = labelForAp(ap, neighbors, port, { refreshUnsupported });
   const operational = isOperational(ap);
 
   let status = 'ok';
@@ -890,7 +1111,7 @@ function detailForAp(ap, neighbors, port) {
     const err = label.slice(6);
     if (err === 'Offline') status = 'offline';
     else if (err === 'PoE disabled') status = 'poe_disabled';
-    else if (err === 'No LLDP') status = 'no_lldp';
+    else if (err.startsWith('No LLDP')) status = 'no_lldp';
     else status = 'no_data';
   }
 
@@ -927,6 +1148,7 @@ function detailForAp(ap, neighbors, port) {
     status,
     underpowered,
     label,
+    lldpRefreshUnsupported: refreshUnsupported,
     standard: negotiatedStandard || null,
     class: cls,
     allocW: wattsFromMw(lldp && lldp.lldpPSEAllocPowerVal),
@@ -944,16 +1166,26 @@ function detailForAp(ap, neighbors, port) {
   };
 }
 
-function poeResultsForAps(aps, neighborsBySerial, portIndex) {
+// Key for an AP's PoE result: its MAC, or its serial when RUCKUS One hasn't
+// reported a MAC (e.g. a newly added AP). The renderer uses the same rule.
+function poeResultKey(ap) {
+  const mac = String(ap.mac || ap.macAddress || '').toLowerCase();
+  if (mac) return mac;
+  return ap.serialNumber ? `serial:${ap.serialNumber}` : '';
+}
+
+function poeResultsForAps(aps, neighborsBySerial, portIndex, { refreshUnsupported = new Set() } = {}) {
   const labels = {};
   const details = {};
   for (const ap of aps) {
-    const mac = String(ap.mac || ap.macAddress || '').toLowerCase();
+    const mac = poeResultKey(ap);
     if (!mac) continue;
     const neighbors = neighborsBySerial[ap.serialNumber] || [];
     const lldp = pickPseNeighbor(neighbors);
     const port = findPort(ap, lldp, portIndex);
-    const detail = detailForAp(ap, neighbors, port);
+    const detail = detailForAp(ap, neighbors, port, {
+      refreshUnsupported: refreshUnsupported.has(ap.serialNumber)
+    });
     labels[mac] = detail.label;
     details[mac] = detail;
   }
@@ -978,3 +1210,9 @@ module.exports.indexPorts = indexPorts;
 module.exports.pickPseNeighbor = pickPseNeighbor;
 module.exports.standardRank = standardRank;
 module.exports.wattsFromMw = wattsFromMw;
+module.exports.withRateLimitRetry = withRateLimitRetry;
+module.exports.imageRedirectOptions = imageRedirectOptions;
+module.exports.friendlyNetworkError = friendlyNetworkError;
+module.exports.authFailureError = authFailureError;
+module.exports.isFirmwareUnsupportedError = isFirmwareUnsupportedError;
+module.exports.poeResultKey = poeResultKey;
