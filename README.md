@@ -1,6 +1,8 @@
 # RUCKUS One Device Mapper
 
-Desktop app for viewing RUCKUS One access points on venue floor plans, with RF details (channel, bandwidth, transmit power) and optional PoE information.  Adds AFC power state if 6GHz is enabled.  This gives you a holistic view of all devices on a floor plan with RF info at a glance.
+Desktop app for viewing RUCKUS One access points and switches on venue floor plans, with RF details (channel, bandwidth, transmit power) and optional PoE/LLDP information.  Adds AFC power state if 6GHz is enabled.  This gives you a holistic view of all devices on a floor plan with RF info at a glance.
+
+Major feature:  Move devices from Unplanned in a Venue onto the map with precision.
 
 Map images, floor-plan scale, and device locations are obtained through the RUCKUS One (R1) APIs.
 
@@ -29,11 +31,12 @@ macOS builds are signed and notarized by Apple, so they open normally. The Windo
 - Sign in with RUCKUS ONE API credentials (region, tenant ID, client ID, client secret)
 - Browse venues and floor plans
 - Overlay APs on floor plan images with status and RF labels
-- Optional hostname and PoE level display
-- Search APs by hostname or serial number
-- Zoom, pan, and font-size controls
+- Overlay switches on floor plan images with PoE budget shown
+- Optional PoE/LLDP level display
+- Search devices Globally or per Floor entering a hostname, serial number, IP address, or MAC address
+- Opacity, zoom, pan, and font-size controls
 - Click device icon for more information (IP address, MAC address, etc.)
-- Edit mode (Administrator Scope): drag APs or switches to update floor-plan coordinates in RUCKUS One
+- Edit mode (Administrator Scope): drag APs or switches to update floor-plan coordinates in RUCKUS One including Unplaced devices.
 
 ## Screenshots
 
