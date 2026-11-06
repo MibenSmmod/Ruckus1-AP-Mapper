@@ -292,6 +292,9 @@ const elements = {
 
   // Keyboard Shortcuts Modal (FR#11)
   shortcutsModal: document.getElementById('shortcuts-modal'),
+  messageModal: document.getElementById('message-modal'),
+  messageModalText: document.getElementById('message-modal-text'),
+  messageModalOkBtn: document.getElementById('message-modal-ok-btn'),
   closeShortcutsBtn: document.getElementById('close-shortcuts-btn'),
   shortcutsDoneBtn: document.getElementById('shortcuts-done-btn'),
 
@@ -1043,6 +1046,9 @@ function setupEventListeners() {
   if (elements.shortcutsDoneBtn) {
     elements.shortcutsDoneBtn.addEventListener('click', closeShortcutsModal);
   }
+  if (elements.messageModalOkBtn) {
+    elements.messageModalOkBtn.addEventListener('click', closeMessageModal);
+  }
   if (elements.shortcutsModal) {
     elements.shortcutsModal.addEventListener('click', (e) => {
       if (e.target === elements.shortcutsModal) closeShortcutsModal();
@@ -1345,6 +1351,11 @@ function handleEscapeKey(e) {
     cancelDeviceDrag();
     return;
   }
+  if (isOverlayVisible(elements.messageModal)) {
+    e.preventDefault();
+    closeMessageModal();
+    return;
+  }
   if (isOverlayVisible(elements.exampleModal)) {
     e.preventDefault();
     closeExampleModal();
@@ -1451,6 +1462,7 @@ function handleSearchDropdownKey(e) {
 
 function handleMapKeyboardShortcut(e) {
   if (!screens.map.classList.contains('active')) return;
+  if (isOverlayVisible(elements.messageModal)) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (isTypingTarget(document.activeElement)) return;
 
@@ -4146,16 +4158,49 @@ async function toggleEditMode() {
   }
 
   if (elements.editModeBtn) elements.editModeBtn.disabled = true;
+  let denial = null;
   try {
-    const ok = await ensurePlacementWriteAccess();
-    if (!ok) {
+    const access = await ensurePlacementWriteAccess();
+    if (!access.ok) {
+      denial = access.message;
       setEditMode(false);
       return;
     }
     setEditMode(true);
   } finally {
     if (elements.editModeBtn) elements.editModeBtn.disabled = false;
+    if (denial) await showMessage(denial);
   }
+}
+
+// In-app message box (QA-011). alert() freezes the window, so a rolled-back
+// marker or Edit turning off could still show the old state behind it. This
+// box is plain HTML, so the map keeps repainting underneath. Messages queue;
+// the returned promise resolves when the user clicks OK or presses Esc/Enter.
+let messageQueue = Promise.resolve();
+let resolveOpenMessage = null;
+
+function showMessage(text) {
+  messageQueue = messageQueue.then(() => new Promise((resolve) => {
+    if (!elements.messageModal || !elements.messageModalText) {
+      alert(text);
+      resolve();
+      return;
+    }
+    elements.messageModalText.textContent = String(text);
+    elements.messageModal.classList.remove('hidden');
+    resolveOpenMessage = resolve;
+    if (elements.messageModalOkBtn) elements.messageModalOkBtn.focus();
+  }));
+  return messageQueue;
+}
+
+function closeMessageModal() {
+  if (!elements.messageModal) return;
+  elements.messageModal.classList.add('hidden');
+  const resolve = resolveOpenMessage;
+  resolveOpenMessage = null;
+  if (resolve) resolve();
 }
 
 function probePercent(value) {
@@ -4190,17 +4235,16 @@ function pickProbeDevice() {
 }
 
 async function ensurePlacementWriteAccess() {
-  if (state.canWritePositions === true) return true;
+  if (state.canWritePositions === true) return { ok: true };
   if (state.canWritePositions === false) {
-    alert(ADMIN_SCOPE_MESSAGE);
-    return false;
+    return { ok: false, message: ADMIN_SCOPE_MESSAGE };
   }
 
   const probeTarget = pickProbeDevice();
   if (!probeTarget) {
     // Nothing placed on this floor to re-write safely. Allow edit mode
     // unverified; the first real move confirms access (403 rolls back).
-    return true;
+    return { ok: true };
   }
 
   const result = await window.api.probePlacementWriteAccess({
@@ -4215,19 +4259,16 @@ async function ensurePlacementWriteAccess() {
   if (!result.success) {
     if (result.statusCode === 403) {
       state.canWritePositions = false;
-      alert(ADMIN_SCOPE_MESSAGE);
-      return false;
+      return { ok: false, message: ADMIN_SCOPE_MESSAGE };
     }
-    alert(`Could not verify write access: ${result.error || 'Unknown error'}`);
-    return false;
+    return { ok: false, message: `Could not verify write access: ${result.error || 'Unknown error'}` };
   }
 
   state.canWritePositions = !!result.canWrite;
   if (!state.canWritePositions) {
-    alert(ADMIN_SCOPE_MESSAGE);
-    return false;
+    return { ok: false, message: ADMIN_SCOPE_MESSAGE };
   }
-  return true;
+  return { ok: true };
 }
 
 function canvasPointToPercent(canvasX, canvasY) {
@@ -4430,9 +4471,9 @@ async function finishDeviceDrag() {
     ? drag.device.serialNumber
     : drag.device.id;
   if (!deviceId) {
-    alert('Cannot update this device: missing serial number or switch id.');
     syncEditModeUi();
     renderFloorPlan();
+    await showMessage('Cannot update this device: missing serial number or switch id.');
     return;
   }
 
@@ -4469,9 +4510,9 @@ async function finishDeviceDrag() {
     if (result.statusCode === 403) {
       state.canWritePositions = false;
       setEditMode(false);
-      alert(ADMIN_SCOPE_MESSAGE);
+      await showMessage(ADMIN_SCOPE_MESSAGE);
     } else {
-      alert(`Failed to update device location: ${result.error || 'Unknown error'}`);
+      await showMessage(`Failed to update device location: ${result.error || 'Unknown error'}`);
     }
   }
 }

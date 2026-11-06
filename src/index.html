@@ -865,6 +865,16 @@
       </div>
     </div>
 
+    <!-- In-app message box (QA-011): unlike alert(), it doesn't freeze repainting -->
+    <div id="message-modal" class="modal hidden" role="alertdialog" aria-modal="true" aria-describedby="message-modal-text">
+      <div class="modal-content message-modal-content">
+        <p id="message-modal-text" class="message-modal-text"></p>
+        <div class="modal-buttons">
+          <button type="button" id="message-modal-ok-btn" class="btn primary">OK</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Global Search Modal (FR#17) -->
     <div id="global-search-modal" class="modal hidden">
       <div class="modal-content global-search-modal-content">
