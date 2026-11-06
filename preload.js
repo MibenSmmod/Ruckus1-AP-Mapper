@@ -29,7 +29,6 @@ contextBridge.exposeInMainWorld('api', {
 
   // FR#18: typed floor-position update only (no raw method/path)
   updateDevicePosition: (params) => ipcRenderer.invoke('update-device-position', params),
-  probePlacementWriteAccess: (params) => ipcRenderer.invoke('probe-placement-write-access', params),
 
   // FR#17 Global Search index
   buildGlobalSearchIndex: (params) => ipcRenderer.invoke('build-global-search-index', params),

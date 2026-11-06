@@ -3,9 +3,9 @@ const path = require('path');
 const fs = require('fs');
 const RuckusAPI = require('./src/api/ruckus');
 const { checkForUpdates } = require('./src/updater');
-const { createPdfFromJpeg } = require('./src/exportPdf');
+const { createPdfFromJpeg, paperForCountry } = require('./src/exportPdf');
 
-const APP_DISPLAY_NAME = 'RUCKUS One AP Mapper';
+const APP_DISPLAY_NAME = 'RUCKUS One Device Mapper';
 const CONFIG_VERSION_ENCRYPTED = 2;
 
 let mainWindow;
@@ -218,7 +218,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false
     },
-    title: 'RUCKUS One AP Mapper'
+    title: 'RUCKUS One Device Mapper'
   };
   if (icon) {
     options.icon = icon;
@@ -414,7 +414,8 @@ ipcMain.handle('export-map', async (event, { dataBase64, format, defaultName, wi
 
     const binary = Buffer.from(dataBase64, 'base64');
     if (isPdf) {
-      const pdf = createPdfFromJpeg(binary, width, height);
+      const paper = paperForCountry(app.getLocaleCountryCode());
+      const pdf = createPdfFromJpeg(binary, width, height, { paper });
       fs.writeFileSync(result.filePath, pdf);
     } else {
       fs.writeFileSync(result.filePath, binary);
@@ -629,35 +630,6 @@ ipcMain.handle('update-device-position', async (event, params = {}) => {
       });
     }
     return { success: true };
-  } catch (error) {
-    return {
-      success: false,
-      error: error.message,
-      statusCode: error.statusCode || null
-    };
-  }
-});
-
-// FR#18: probe whether the token can write floor positions by re-writing a
-// placed device's current coordinates (no coordinate change).
-ipcMain.handle('probe-placement-write-access', async (event, params = {}) => {
-  try {
-    if (!ruckusClient) {
-      throw new Error('Not authenticated');
-    }
-    const { type, venueId, floorPlanId, deviceId, xPercent, yPercent } = params;
-    if (type !== 'ap' && type !== 'switch') {
-      throw new Error('type must be "ap" or "switch"');
-    }
-    const result = await ruckusClient.probePlacementWriteAccess({
-      type,
-      venueId,
-      floorPlanId,
-      deviceId,
-      xPercent,
-      yPercent
-    });
-    return { success: true, ...result };
   } catch (error) {
     return {
       success: false,

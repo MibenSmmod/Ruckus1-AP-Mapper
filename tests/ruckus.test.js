@@ -110,6 +110,25 @@ test('applyRadioStatuses copies live tx power, bandwidth, AFC and client count',
   assert.strictEqual(aps[0].radio.apRadioParams24G.actualTxPower, undefined);
 });
 
+test('applyRadioStatuses marks live 6G for APs on venue settings (no enable6G)', () => {
+  const aps = [
+    { serialNumber: 'S1', radio: { useVenueSettings: true, apRadioParams6G: { operativeChannel: 69 } } },
+    { serialNumber: 'S2', radio: { useVenueSettings: true, apRadioParams6G: {} } },
+    { serialNumber: 'S3', radio: { apRadioParams6G: {} } }
+  ];
+  applyRadioStatuses(aps, [
+    { serialNumber: 'S1', radioStatuses: [{ band: '6G', channel: 69, channelBandwidth: '160', actualTxPower: 22 }] },
+    { serialNumber: 'S2', radioStatuses: [{ band: '6G', channel: 37, channelBandwidth: '320' }] },
+    { serialNumber: 'S3', radioStatuses: [{ band: '6G', channel: 0 }] }
+  ]);
+  assert.strictEqual(aps[0].radio.live6G, true);
+  assert.strictEqual(aps[0].radio.apRadioParams6G.operativeChannel, 69);
+  assert.strictEqual(aps[0].radio.apRadioParams6G.actualTxPower, 22);
+  assert.strictEqual(aps[1].radio.live6G, true);
+  assert.strictEqual(aps[1].radio.apRadioParams6G.operativeChannel, 37);
+  assert.strictEqual(aps[2].radio.live6G, undefined);
+});
+
 test('applyClientBandCounts totals clients per band and matches by serial or MAC', () => {
   const aps = [
     { serialNumber: 'S1', mac: 'AA:AA:AA:AA:AA:01' },
@@ -233,35 +252,8 @@ test('placement gate refuses other methods, paths and body fields', async () => 
   assert.strictEqual(calls.length, 0);
 });
 
-test('write-access probe re-writes current coordinates (no-op move)', async () => {
-  const { client, calls } = stubClient();
-  const base = { venueId: 'v1', floorPlanId: 'f1', deviceId: 'SN1' };
-  assert.deepStrictEqual(
-    await client.probePlacementWriteAccess({ type: 'ap', ...base, xPercent: 12.5, yPercent: 40 }),
-    { canWrite: true }
-  );
-  await client.probePlacementWriteAccess({ type: 'switch', ...base, xPercent: 0, yPercent: 100 });
-  assert.deepStrictEqual(calls, [
-    { method: 'PUT', path: '/venues/v1/floorplans/f1/aps/SN1/floorPositions', body: { xPercent: 12.5, yPercent: 40 } },
-    { method: 'PUT', path: '/venues/v1/switches/SN1/positions', body: { floorPlanId: 'f1', xPercent: 0, yPercent: 100 } }
-  ]);
-});
-
-test('write-access probe maps 403 to Read Only and surfaces other errors', async () => {
-  const base = { type: 'ap', venueId: 'v', floorPlanId: 'f', deviceId: 'S', xPercent: 1, yPercent: 1 };
-  const forbidden = stubClient(() => { throw httpError(403); }).client;
-  assert.deepStrictEqual(await forbidden.probePlacementWriteAccess(base), { canWrite: false, statusCode: 403 });
-  const badRequest = stubClient(() => { throw httpError(400); }).client;
-  await assert.rejects(badRequest.probePlacementWriteAccess(base));
-});
-
-test('write-access probe refuses missing or out-of-range coordinates without a request', async () => {
-  const { client, calls } = stubClient();
-  const base = { type: 'ap', venueId: 'v', floorPlanId: 'f', deviceId: 'S' };
-  for (const bad of [{}, { xPercent: -1, yPercent: 0 }, { xPercent: 101, yPercent: 5 }, { xPercent: '5', yPercent: 5 }, { xPercent: NaN, yPercent: 1 }]) {
-    await assert.rejects(client.probePlacementWriteAccess({ ...base, ...bad }), /Probe refused/);
-  }
-  assert.strictEqual(calls.length, 0);
+test('client exposes no write-access probe (Edit mode writes only on a real drop)', () => {
+  assert.strictEqual(typeof new RuckusAPI('na').probePlacementWriteAccess, 'undefined');
 });
 
 test('region must be na, eu or asia', () => {

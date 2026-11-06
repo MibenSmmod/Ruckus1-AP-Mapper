@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RUCKUS One AP Mapper is an Electron desktop application for visualizing RUCKUS ONE access point locations on venue floor plans with RF and power information overlay. Built with Node.js (CommonJS modules), it integrates with the RUCKUS ONE REST API for AP data and for Power over Ethernet (PoE) information (AP LLDP neighbors and ICX switch ports).
+RUCKUS One Device Mapper is an Electron desktop application for visualizing RUCKUS ONE access point locations on venue floor plans with RF and power information overlay. Built with Node.js (CommonJS modules), it integrates with the RUCKUS ONE REST API for AP data and for Power over Ethernet (PoE) information (AP LLDP neighbors and ICX switch ports).
 
 ## Architecture
 

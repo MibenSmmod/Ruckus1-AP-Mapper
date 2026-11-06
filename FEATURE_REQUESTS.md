@@ -28,6 +28,9 @@ Status: `🟢 open` | `in progress` | `done` | `wontfix`
 | [FR#20](#fr20---create-a-getting-started-guide) | done | Create a getting started guide |
 | [FR#21](#fr21---enhance-getting-started-guide) | 🟢 open | Enhance Getting Started feature |
 | [FR#22](#fr22---network-topology) | 🟢 open | Network Topology |
+| [FR#23](#fr23---hide-labels-for-offline-devices) | 🟢 open | Hide labels for offline devices |
+| [FR#24](#fr24---ap-gps-coordinates-link-to-google-maps) | 🟢 open | AP GPS coordinates (link to Google Maps) |
+| [FR#25](#fr25---remove-a-placed-device-from-the-floor-unplace) | 🟢 open | Remove a placed device from the floor (unplace) |
 
 ---
 
@@ -135,7 +138,7 @@ Add search icon to the Select Venues page.  This will perform a global search us
 
 Requires API credentials with write access (Administrator Scope). Add an Edit button on the right side of the floor plan page to edit device locations on the map. Tell the user they must provide credentials with Administrator Scope (rights to send R1 updates). Investigate a way to test whether the user has the correct level of write access to R1 via API. Login page currently notes that Read-Only credentials are recommended — add notes that if Administrator Scope is provided, editing device locations on the map is possible. Update the GitHub README accordingly. Allow the user to click and drag a device icon from its current location to a new location; on release, call the R1 API to update the device coordinates in the cloud. While dragging, remove the device icon and replace it with crosshairs for pinpoint accuracy; once dropped, restore the icon at the new location on the map.
 
-**Done:** Map Edit toggle (Administrator Scope). Probe write access by re-writing a placed device's current coordinates on this floor (no-op move; 2xx vs 403). Floors with nothing placed skip the probe and the first real move confirms access. Drag AP/switch with crosshairs; drop writes via `PUT .../floorPositions` (AP) or `PUT .../switches/{id}/positions` (switch) only — guarded by `_placementWrite` + typed IPC. Login help + README note Administrator for editing. Esc / leave map cancels drag without write; failed write restores prior coords. Edit mode also shows a right-side **Unplaced Devices** panel (venue APs/switches with no floor placement); drag from the list onto the current floor to place via the same allowlisted PUTs.
+**Done:** Map Edit toggle (Administrator Scope). Turning Edit on makes no R1 write: the first real drop confirms access (2xx → writable; 403 → the drop rolls back, Edit turns off, Administrator Scope message, and Read Only is remembered until logout). An earlier no-op "re-write current position" probe was removed in QA-012 because R1 reported it as a placement. Drag AP/switch with crosshairs; drop writes via `PUT .../floorPositions` (AP) or `PUT .../switches/{id}/positions` (switch) only — guarded by `_placementWrite` + typed IPC. Login help + README note Administrator for editing. Esc / leave map cancels drag without write; failed write restores prior coords. Edit mode also shows a right-side **Unplaced Devices** panel (venue APs/switches with no floor placement); drag from the list onto the current floor to place via the same allowlisted PUTs.
 
 ## FR#19 - Map opacity
 
@@ -158,6 +161,41 @@ Make the popout a floating window so it can stay on the screen while the user tr
 Create a page similar to the R1 UX that compiles a network topology with devices that are clickable.  If the device is offline then show it with a red dot and red cable.  Use LLDP to track connections and show a label with which ports are connected.
 
 Reference (R1 topology view): tree layout with Cloud at the top, ICX switches below it, and APs below each switch. Each device shows a model icon, a full hostname, and a status dot; links are curved cables (green when online), with a collapse (⊖) toggle under each switch for its children.
+
+## FR#23 - Hide labels for offline devices
+
+Add a new setting: Turn off all labels for offline devices.  This overrides all other display settings.  Default unchecked.  Put this above Dark Mode in the settings list.
+
+## FR#24 - AP GPS coordinates (link to Google Maps)
+
+In the access point details after the user clicks the icon add GPS Coordinates.  Make this a hyperlink and send it to Google Maps in their own browser.  Prompt the user to allow this action with a cancel option.  Unless you feel you can do this with an embedded map with zero API/paid/etc integrations.
+
+**Plan:**
+
+1. **Data source (verify first).** `GET /venues/aps` (already used by `getAllAccessPoints`) returns full AP objects; the RUCKUS One AP schema carries `deviceGps: { latitude, longitude }`. Confirm against a live tenant. If an AP has no GPS of its own, fall back to the venue's `address.latitude` / `address.longitude` and label it "(venue)". If neither exists, show `N/A` with no link. No new API calls needed.
+2. **Popup row.** Add a "GPS" row to `#ap-popup` in `index.html` under IP. In `showAPPopup` (`renderer.js`), format as `lat, lng` (6 decimals), and render as a link-styled button only when both values parse as finite numbers in range (lat ±90, lng ±180).
+3. **Confirm modal.** Clicking opens a small modal like the existing PoE confirm modals: "Open these coordinates in Google Maps in your default browser?" with **Open** / **Cancel**. Esc, backdrop, and Cancel close it without doing anything.
+4. **Open externally.** New typed IPC `openMapLocation({ lat, lng })` in `preload.js` → `main.js`. Main re-validates the numbers and builds the URL itself (`https://www.google.com/maps/search/?api=1&query=<lat>,<lng>`, the documented no-key URL), then calls `shell.openExternal`. The renderer never passes a raw URL, so this can't become a generic open-any-link channel.
+5. **Copy.** Clicking the coordinates text (not the link) copies `lat, lng` to the clipboard, handy for tickets.
+6. **Docs.** Update the Getting Started checklist (FR#20) and README.
+
+**Embedded map: not recommended.** The only zero-key options are an OpenStreetMap `export/embed.html` iframe or Google's undocumented `output=embed` URL. Both mean loosening the app's CSP (`frame-src`) to load third-party content inside the app, both need internet, and the Google one is unsupported and can break any time. OSM's tile policy also allows only light use. The external link keeps the app's CSP locked down and gives the user the full Google Maps experience (Street View, directions).
+
+## FR#25 - Remove a placed device from the floor (unplace)
+
+In Edit mode, let the user deliberately remove a placed AP or switch from the current floor so it returns to the venue's Unplaced Devices list. In R1 this happens by accident: dragging a device a short distance several times eventually drops it off the map. This app should make removal an explicit, confirmed action, never a side effect of dragging.
+
+**Plan:**
+
+1. **API (verify first).** Find the documented RUCKUS One call that clears a device's floor placement for an AP (`/venues/{venueId}/floorplans/{floorplanId}/aps/{serial}/floorPositions`) and for a switch (`/venues/{venueId}/switches/{switchId}/positions`), e.g. a `DELETE` on the same resource or a `PUT` with no floor plan. Confirm against a lab venue before any UI work. If there is no supported way to unplace, mark this `wontfix`.
+2. **Write allowlist.** Add the unplace call to the FR#18 placement allowlist in `src/api/ruckus.js` as its own named method (exact method + path pattern, no body beyond what's required). Unit tests for the allowed call and for refusing anything else. Update the Phase 0 "only mutating calls" check in `QA_WORKFLOW.md`.
+3. **UI entry point.** Only in Edit mode, with write access confirmed:
+   - A **Remove from floor** button in the AP and switch popups, and
+   - Dragging a placed device onto the Unplaced Devices panel.
+   Plain drags on the map never unplace, however short or repeated.
+4. **Confirm.** A modal names the device and floor: "Remove TR-02-LivingRm from Hawkeye-1st-Floor? It stays in the venue and moves to Unplaced Devices." with **Remove** / **Cancel**. Esc, backdrop, and Cancel do nothing.
+5. **After the write.** On success the device leaves the map, appears in the Unplaced list (badge count updates), and legend counts adjust. On failure the device stays where it was; 403 → Administrator Scope message and Edit turns off, same as moves.
+6. **Docs.** README, Getting Started item 6 (Edit mode), and QA Phase 4e checks: Read Only refused, confirm/cancel, R1 shows the device unassigned, re-placing it from Unplaced works.
 
 ---
 

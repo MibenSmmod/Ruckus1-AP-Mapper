@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
-  <title>RUCKUS One AP Mapper</title>
+  <title>RUCKUS One Device Mapper</title>
   <script src="theme-boot.js"></script>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -13,7 +13,7 @@
     <!-- Login Screen -->
     <div id="login-screen" class="screen active">
       <div class="login-container">
-        <h1>RUCKUS One AP Mapper</h1>
+        <h1>RUCKUS One Device Mapper</h1>
         <p class="subtitle">Enter API info to access your R1 account</p>
         <p class="example-link-row">
           <button type="button" id="view-example-btn" class="link-button">See an example map</button>
@@ -90,7 +90,7 @@
               <li>Menu: <strong>Administration</strong> &gt; <strong>Account Management</strong> &gt; <strong>Settings</strong></li>
               <li>Scroll down to <strong>Application Tokens</strong></li>
               <li>Click <strong>Add Token</strong> link (far right)</li>
-              <li>Enter a name (e.g., "RUCKUS One AP Mapper")</li>
+              <li>Enter a name (e.g., "RUCKUS One Device Mapper")</li>
               <li>Scope: select <strong>Read Only</strong> (Recommended for viewing). Use <strong>Administrator</strong> Scope if you need to Edit and move device locations on the map (writes coordinates back to RUCKUS One).</li>
               <li>Press <strong>Add</strong> button</li>
               <li>Copy the <strong>Client ID</strong> and <strong>Shared Secret</strong></li>
@@ -124,7 +124,7 @@
           </details>
         </div>
 
-        <div class="version-info">v1.2.0</div>
+        <div class="version-info">v1.3.0</div>
       </div>
     </div>
 
@@ -635,7 +635,7 @@
         </div>
         <p class="example-modal-desc">Access points with RF details (channel / bandwidth / Tx power / clients), LLDP neighbor and PoE info, and switches with PoE budget on a venue floor plan.</p>
         <div class="example-image-wrap">
-          <img src="assets/example-map.jpg" alt="Example RUCKUS One AP Mapper floor plan with access points and RF overlays">
+          <img src="assets/example-map.jpg" alt="Example RUCKUS One Device Mapper floor plan with access points and RF overlays">
         </div>
         <div class="modal-buttons">
           <button type="button" id="example-back-btn" class="btn primary">Back to Login</button>
@@ -861,6 +861,16 @@
         </table>
         <div class="modal-buttons">
           <button type="button" id="shortcuts-done-btn" class="btn primary">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- In-app message box (QA-011): unlike alert(), it doesn't freeze repainting -->
+    <div id="message-modal" class="modal hidden" role="alertdialog" aria-modal="true" aria-describedby="message-modal-text">
+      <div class="modal-content message-modal-content">
+        <p id="message-modal-text" class="message-modal-text"></p>
+        <div class="modal-buttons">
+          <button type="button" id="message-modal-ok-btn" class="btn primary">OK</button>
         </div>
       </div>
     </div>

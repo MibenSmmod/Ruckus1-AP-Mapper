@@ -90,7 +90,7 @@ const state = {
   editBannerDismissed: false, // hide tip for this edit session only
   unplacedPanelDismissed: false, // hide unplaced panel for this edit session only
   unplacedSearchQuery: '',
-  canWritePositions: null, // null = unverified (probe or first move decides), true/false after
+  canWritePositions: null, // null = unverified (first drop decides), true/false after
   deviceDrag: null // active drag incl. source 'map'|'unplaced'
 };
 
@@ -292,6 +292,9 @@ const elements = {
 
   // Keyboard Shortcuts Modal (FR#11)
   shortcutsModal: document.getElementById('shortcuts-modal'),
+  messageModal: document.getElementById('message-modal'),
+  messageModalText: document.getElementById('message-modal-text'),
+  messageModalOkBtn: document.getElementById('message-modal-ok-btn'),
   closeShortcutsBtn: document.getElementById('close-shortcuts-btn'),
   shortcutsDoneBtn: document.getElementById('shortcuts-done-btn'),
 
@@ -1043,6 +1046,9 @@ function setupEventListeners() {
   if (elements.shortcutsDoneBtn) {
     elements.shortcutsDoneBtn.addEventListener('click', closeShortcutsModal);
   }
+  if (elements.messageModalOkBtn) {
+    elements.messageModalOkBtn.addEventListener('click', closeMessageModal);
+  }
   if (elements.shortcutsModal) {
     elements.shortcutsModal.addEventListener('click', (e) => {
       if (e.target === elements.shortcutsModal) closeShortcutsModal();
@@ -1345,6 +1351,11 @@ function handleEscapeKey(e) {
     cancelDeviceDrag();
     return;
   }
+  if (isOverlayVisible(elements.messageModal)) {
+    e.preventDefault();
+    closeMessageModal();
+    return;
+  }
   if (isOverlayVisible(elements.exampleModal)) {
     e.preventDefault();
     closeExampleModal();
@@ -1451,6 +1462,7 @@ function handleSearchDropdownKey(e) {
 
 function handleMapKeyboardShortcut(e) {
   if (!screens.map.classList.contains('active')) return;
+  if (isOverlayVisible(elements.messageModal)) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (isTypingTarget(document.activeElement)) return;
 
@@ -2628,8 +2640,14 @@ function deviceStatusCategory(status) {
 // 6GHz enabled filter: radio is on and has a 6 GHz channel configured/operating
 function apHas6GEnabled(ap) {
   const radio = ap && ap.radio;
-  if (!radio || radio.enable6G !== true || !radio.apRadioParams6G) return false;
+  if (!radio6GEnabled(radio)) return false;
   return !!radio.apRadioParams6G.operativeChannel;
+}
+
+// 6G radio is on: explicit per-AP enable6G, or (venue-inherited settings) the
+// live radio status reports an operating 6G radio (set by applyRadioStatuses).
+function radio6GEnabled(radio) {
+  return !!(radio && radio.apRadioParams6G && (radio.enable6G === true || radio.live6G === true));
 }
 
 function deviceModelName(device) {
@@ -2978,7 +2996,7 @@ function getApChannelKeys(ap) {
   if (radio.apRadioParams50G && radio.apRadioParams50G.operativeChannel) {
     keys.add(`5G:${radio.apRadioParams50G.operativeChannel}`);
   }
-  if (radio.enable6G === true && radio.apRadioParams6G && radio.apRadioParams6G.operativeChannel) {
+  if (radio6GEnabled(radio) && radio.apRadioParams6G.operativeChannel) {
     keys.add(`6G:${radio.apRadioParams6G.operativeChannel}`);
   }
   return keys;
@@ -3567,8 +3585,8 @@ function drawChannelLabels(ap, x, y, apRadius, apColor, labelsOnLeft = false, hi
       }
     }
 
-    // 6GHz - only show if hardware is enabled (enable6G: true)
-    if (radio.apRadioParams6G && radio.enable6G === true) {
+    // 6GHz - only show if enabled (enable6G: true, or live status reports 6G)
+    if (radio6GEnabled(radio)) {
       if (radio.apRadioParams6G.operativeChannel) {
         const ch = radio.apRadioParams6G.operativeChannel;
         const bw = operativeBandwidth(radio.apRadioParams6G);
@@ -4139,89 +4157,53 @@ async function toggleEditMode() {
     return;
   }
 
-  if (elements.editModeBtn) elements.editModeBtn.disabled = true;
-  try {
-    const ok = await ensurePlacementWriteAccess();
-    if (!ok) {
-      setEditMode(false);
+  const access = ensurePlacementWriteAccess();
+  if (!access.ok) {
+    setEditMode(false);
+    await showMessage(access.message);
+    return;
+  }
+  setEditMode(true);
+}
+
+// In-app message box (QA-011). alert() freezes the window, so a rolled-back
+// marker or Edit turning off could still show the old state behind it. This
+// box is plain HTML, so the map keeps repainting underneath. Messages queue;
+// the returned promise resolves when the user clicks OK or presses Esc/Enter.
+let messageQueue = Promise.resolve();
+let resolveOpenMessage = null;
+
+function showMessage(text) {
+  messageQueue = messageQueue.then(() => new Promise((resolve) => {
+    if (!elements.messageModal || !elements.messageModalText) {
+      alert(text);
+      resolve();
       return;
     }
-    setEditMode(true);
-  } finally {
-    if (elements.editModeBtn) elements.editModeBtn.disabled = false;
-  }
+    elements.messageModalText.textContent = String(text);
+    elements.messageModal.classList.remove('hidden');
+    resolveOpenMessage = resolve;
+    if (elements.messageModalOkBtn) elements.messageModalOkBtn.focus();
+  }));
+  return messageQueue;
 }
 
-function probePercent(value) {
-  if (value == null || value === '') return null;
-  const n = Number(value);
-  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
+function closeMessageModal() {
+  if (!elements.messageModal) return;
+  elements.messageModal.classList.add('hidden');
+  const resolve = resolveOpenMessage;
+  resolveOpenMessage = null;
+  if (resolve) resolve();
 }
 
-// The probe re-writes a device's current position, so only devices already
-// placed on this floor with valid coordinates qualify (never unplaced ones).
-function pickProbeDevice() {
-  const floorPlanId = state.selectedFloorPlan && state.selectedFloorPlan.id;
-  if (!floorPlanId) return null;
-  for (const ap of state.accessPoints) {
-    const pos = ap.position;
-    if (!ap.serialNumber || !pos || pos.floorplanId !== floorPlanId) continue;
-    const xPercent = probePercent(pos.xPercent);
-    const yPercent = probePercent(pos.yPercent);
-    if (xPercent != null && yPercent != null) {
-      return { type: 'ap', deviceId: ap.serialNumber, xPercent, yPercent };
-    }
-  }
-  for (const sw of state.switches) {
-    if (!sw.id || sw.floorplanId !== floorPlanId) continue;
-    const xPercent = probePercent(sw.xPercent);
-    const yPercent = probePercent(sw.yPercent);
-    if (xPercent != null && yPercent != null) {
-      return { type: 'switch', deviceId: sw.id, xPercent, yPercent };
-    }
-  }
-  return null;
-}
-
-async function ensurePlacementWriteAccess() {
-  if (state.canWritePositions === true) return true;
+// Edit mode makes no R1 writes of its own: write access is learned from the
+// first real drop (2xx → writable, 403 → Read Only, and the drop rolls back).
+// A Read Only result is remembered until logout so Edit stays off (QA-012).
+function ensurePlacementWriteAccess() {
   if (state.canWritePositions === false) {
-    alert(ADMIN_SCOPE_MESSAGE);
-    return false;
+    return { ok: false, message: ADMIN_SCOPE_MESSAGE };
   }
-
-  const probeTarget = pickProbeDevice();
-  if (!probeTarget) {
-    // Nothing placed on this floor to re-write safely. Allow edit mode
-    // unverified; the first real move confirms access (403 rolls back).
-    return true;
-  }
-
-  const result = await window.api.probePlacementWriteAccess({
-    type: probeTarget.type,
-    venueId: state.selectedVenue.id,
-    floorPlanId: state.selectedFloorPlan.id,
-    deviceId: probeTarget.deviceId,
-    xPercent: probeTarget.xPercent,
-    yPercent: probeTarget.yPercent
-  });
-
-  if (!result.success) {
-    if (result.statusCode === 403) {
-      state.canWritePositions = false;
-      alert(ADMIN_SCOPE_MESSAGE);
-      return false;
-    }
-    alert(`Could not verify write access: ${result.error || 'Unknown error'}`);
-    return false;
-  }
-
-  state.canWritePositions = !!result.canWrite;
-  if (!state.canWritePositions) {
-    alert(ADMIN_SCOPE_MESSAGE);
-    return false;
-  }
-  return true;
+  return { ok: true };
 }
 
 function canvasPointToPercent(canvasX, canvasY) {
@@ -4424,9 +4406,9 @@ async function finishDeviceDrag() {
     ? drag.device.serialNumber
     : drag.device.id;
   if (!deviceId) {
-    alert('Cannot update this device: missing serial number or switch id.');
     syncEditModeUi();
     renderFloorPlan();
+    await showMessage('Cannot update this device: missing serial number or switch id.');
     return;
   }
 
@@ -4463,9 +4445,9 @@ async function finishDeviceDrag() {
     if (result.statusCode === 403) {
       state.canWritePositions = false;
       setEditMode(false);
-      alert(ADMIN_SCOPE_MESSAGE);
+      await showMessage(ADMIN_SCOPE_MESSAGE);
     } else {
-      alert(`Failed to update device location: ${result.error || 'Unknown error'}`);
+      await showMessage(`Failed to update device location: ${result.error || 'Unknown error'}`);
     }
   }
 }
@@ -4604,7 +4586,7 @@ function showAPPopup(ap) {
     const parts = [];
     if (radio.apRadioParams24G) parts.push(`2.4G: ${byBand['2.4G'] || 0}`);
     if (radio.apRadioParams50G) parts.push(`5G: ${byBand['5G'] || 0}`);
-    if (radio.apRadioParams6G && radio.enable6G === true) parts.push(`6G: ${byBand['6G'] || 0}`);
+    if (radio6GEnabled(radio)) parts.push(`6G: ${byBand['6G'] || 0}`);
     if (!parts.length) {
       // No radio config to filter bands — show whatever counts we have.
       for (const band of ['2.4G', '5G', '6G']) {
@@ -5347,26 +5329,13 @@ function dataUrlToBase64(dataUrl) {
   return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
 }
 
-/**
- * Render the full floor plan (ignores zoom/pan) with current label settings
- * onto an offscreen canvas for PNG/PDF export.
- */
-function buildExportCanvas() {
+// Draw the floor image (optional) and device overlay into targetCtx with the
+// floor image's top-left at (originX, originY). Temporarily swaps the live
+// canvas context and view state so the normal draw code renders unzoomed.
+function drawExportLayer(targetCtx, drawScale, dpr, originX, originY, { withImage }) {
   const img = state.floorPlanImage;
-  if (!img) return null;
-
-  const container = elements.canvas.parentElement;
-  const fitScale = Math.min(container.clientWidth / img.width, container.clientHeight / img.height);
-  const dpr = 2;
-  const drawScale = fitScale * dpr;
-  const margin = Math.round(48 * dpr);
   const scaledWidth = img.width * drawScale;
   const scaledHeight = img.height * drawScale;
-
-  const exportCanvas = document.createElement('canvas');
-  exportCanvas.width = Math.ceil(scaledWidth + margin * 2);
-  exportCanvas.height = Math.ceil(scaledHeight + margin * 2);
-  const exportCtx = exportCanvas.getContext('2d');
 
   const prev = {
     ctx,
@@ -5381,27 +5350,26 @@ function buildExportCanvas() {
     drawPixelRatio: state.drawPixelRatio
   };
 
-  ctx = exportCtx;
+  ctx = targetCtx;
   state.scale = drawScale;
   state.zoom = 1;
   state.panX = 0;
   state.panY = 0;
-  state.offsetX = margin;
-  state.offsetY = margin;
+  state.offsetX = originX;
+  state.offsetY = originY;
   state.selectedSearchDevice = null;
   state.hoveredDevice = null;
   state.drawPixelRatio = dpr;
 
   try {
-    // FR#12: exports always use a light background, regardless of UI dark mode
     // FR#3: hoveredDevice is cleared above so co-channel overlay stays ephemeral
     // FR#19: floor image uses the same opacity as the live map; devices stay full alpha
-    exportCtx.fillStyle = '#ffffff';
-    exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-    exportCtx.save();
-    exportCtx.globalAlpha = clampMapOpacity(state.mapOpacityPercent) / 100;
-    exportCtx.drawImage(img, margin, margin, scaledWidth, scaledHeight);
-    exportCtx.restore();
+    if (withImage) {
+      targetCtx.save();
+      targetCtx.globalAlpha = clampMapOpacity(state.mapOpacityPercent) / 100;
+      targetCtx.drawImage(img, originX, originY, scaledWidth, scaledHeight);
+      targetCtx.restore();
+    }
     beginMapDeviceDraw();
     if (state.showAPs) {
       drawAccessPoints();
@@ -5421,6 +5389,78 @@ function buildExportCanvas() {
     state.hoveredDevice = prev.hoveredDevice;
     state.drawPixelRatio = prev.drawPixelRatio;
   }
+}
+
+// Bounding box of every non-transparent pixel on a canvas, or null if empty.
+function opaqueBounds(canvas) {
+  const { width, height } = canvas;
+  const data = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    const row = y * width * 4;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x * 4 + 3] !== 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  return maxX < 0 ? null : { minX, minY, maxX, maxY };
+}
+
+/**
+ * Render the full floor plan (ignores zoom/pan) with current label settings
+ * onto an offscreen canvas for PNG/PDF export. The canvas grows past the floor
+ * image where device labels extend beyond it, so no label is cropped.
+ */
+function buildExportCanvas() {
+  const img = state.floorPlanImage;
+  if (!img) return null;
+
+  const container = elements.canvas.parentElement;
+  const fitScale = Math.min(container.clientWidth / img.width, container.clientHeight / img.height);
+  const dpr = 2;
+  const drawScale = fitScale * dpr;
+  const margin = Math.round(48 * dpr);
+  const scaledWidth = img.width * drawScale;
+  const scaledHeight = img.height * drawScale;
+
+  // Pass 1: devices only, on a transparent scratch canvas with room on every
+  // side, to find how far labels reach past the floor image.
+  const MAX_SIDE = 16000; // stay under Chromium's canvas size limit
+  const probeMargin = Math.max(0, Math.min(
+    Math.round(Math.max(scaledWidth, scaledHeight) * 0.5 + 400 * dpr),
+    Math.floor((MAX_SIDE - Math.max(scaledWidth, scaledHeight)) / 2)
+  ));
+  const probe = document.createElement('canvas');
+  probe.width = Math.ceil(scaledWidth + probeMargin * 2);
+  probe.height = Math.ceil(scaledHeight + probeMargin * 2);
+  drawExportLayer(probe.getContext('2d'), drawScale, dpr, probeMargin, probeMargin, { withImage: false });
+  const bounds = opaqueBounds(probe);
+
+  // Overflow of the device layer past each edge of the floor image.
+  const overLeft = bounds ? Math.max(0, probeMargin - bounds.minX) : 0;
+  const overTop = bounds ? Math.max(0, probeMargin - bounds.minY) : 0;
+  const overRight = bounds ? Math.max(0, bounds.maxX + 1 - (probeMargin + scaledWidth)) : 0;
+  const overBottom = bounds ? Math.max(0, bounds.maxY + 1 - (probeMargin + scaledHeight)) : 0;
+
+  // Pass 2: final canvas = floor image + label overflow + the usual margin.
+  const originX = margin + Math.ceil(overLeft);
+  const originY = margin + Math.ceil(overTop);
+  const exportCanvas = document.createElement('canvas');
+  exportCanvas.width = Math.ceil(originX + scaledWidth + overRight + margin);
+  exportCanvas.height = Math.ceil(originY + scaledHeight + overBottom + margin);
+  const exportCtx = exportCanvas.getContext('2d');
+
+  // FR#12: exports always use a light background, regardless of UI dark mode
+  exportCtx.fillStyle = '#ffffff';
+  exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+  drawExportLayer(exportCtx, drawScale, dpr, originX, originY, { withImage: true });
 
   return exportCanvas;
 }

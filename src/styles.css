@@ -2533,6 +2533,21 @@ select:focus {
 }
 
 /* Modal */
+/* In-app message box (QA-011) sits above every other modal */
+#message-modal {
+  z-index: 1100;
+}
+
+.message-modal-content {
+  max-width: 420px;
+}
+
+.message-modal-text {
+  margin: 0 0 8px;
+  line-height: 1.45;
+  white-space: pre-line;
+}
+
 .modal {
   position: fixed;
   top: 0;

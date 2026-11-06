@@ -1,4 +1,4 @@
-# RUCKUS One AP Mapper
+# RUCKUS One Device Mapper
 
 Desktop app for viewing RUCKUS One access points on venue floor plans, with RF details (channel, bandwidth, transmit power) and optional PoE information.  Adds AFC power state if 6GHz is enabled.  This gives you a holistic view of all devices on a floor plan with RF info at a glance.
 
@@ -14,13 +14,13 @@ This is an unofficial, community-developed tool. It is **not** affiliated with, 
 
 Installers are on the **[Releases](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases)** page (also linked in the repo sidebar under **About**).
 
-**Latest (v1.2.0):**
+**Latest (v1.3.0):**
 
 | Platform | Download |
 |----------|----------|
-| macOS (Apple Silicon) | [RUCKUS One AP Mapper-1.2.0-arm64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.2.0/Ruckus.One.AP.Mapper-1.2.0-arm64.dmg) |
-| macOS (Intel) | [RUCKUS One AP Mapper-1.2.0-x64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.2.0/Ruckus.One.AP.Mapper-1.2.0-x64.dmg) |
-| Windows (x64) | [RUCKUS One AP Mapper-1.2.0-Setup.exe](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.2.0/Ruckus.One.AP.Mapper-1.2.0-Setup.exe) |
+| macOS (Apple Silicon) | [RUCKUS One Device Mapper-1.3.0-arm64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.3.0/RUCKUS.One.Device.Mapper-1.3.0-arm64.dmg) |
+| macOS (Intel) | [RUCKUS One Device Mapper-1.3.0-x64.dmg](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.3.0/RUCKUS.One.Device.Mapper-1.3.0-x64.dmg) |
+| Windows (x64) | [RUCKUS One Device Mapper-1.3.0-Setup.exe](https://github.com/MibenSmmod/Ruckus1-AP-Mapper/releases/download/v1.3.0/RUCKUS.One.Device.Mapper-1.3.0-Setup.exe) |
 
 macOS builds are signed and notarized by Apple, so they open normally. The Windows installer is signed by WLAN GEEKS LLC; Windows SmartScreen may still show a prompt for a new release until it builds download reputation.
 
