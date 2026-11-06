@@ -90,7 +90,7 @@ const state = {
   editBannerDismissed: false, // hide tip for this edit session only
   unplacedPanelDismissed: false, // hide unplaced panel for this edit session only
   unplacedSearchQuery: '',
-  canWritePositions: null, // null = unverified (probe or first move decides), true/false after
+  canWritePositions: null, // null = unverified (first drop decides), true/false after
   deviceDrag: null // active drag incl. source 'map'|'unplaced'
 };
 
@@ -4157,20 +4157,13 @@ async function toggleEditMode() {
     return;
   }
 
-  if (elements.editModeBtn) elements.editModeBtn.disabled = true;
-  let denial = null;
-  try {
-    const access = await ensurePlacementWriteAccess();
-    if (!access.ok) {
-      denial = access.message;
-      setEditMode(false);
-      return;
-    }
-    setEditMode(true);
-  } finally {
-    if (elements.editModeBtn) elements.editModeBtn.disabled = false;
-    if (denial) await showMessage(denial);
+  const access = ensurePlacementWriteAccess();
+  if (!access.ok) {
+    setEditMode(false);
+    await showMessage(access.message);
+    return;
   }
+  setEditMode(true);
 }
 
 // In-app message box (QA-011). alert() freezes the window, so a rolled-back
@@ -4203,69 +4196,11 @@ function closeMessageModal() {
   if (resolve) resolve();
 }
 
-function probePercent(value) {
-  if (value == null || value === '') return null;
-  const n = Number(value);
-  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
-}
-
-// The probe re-writes a device's current position, so only devices already
-// placed on this floor with valid coordinates qualify (never unplaced ones).
-function pickProbeDevice() {
-  const floorPlanId = state.selectedFloorPlan && state.selectedFloorPlan.id;
-  if (!floorPlanId) return null;
-  for (const ap of state.accessPoints) {
-    const pos = ap.position;
-    if (!ap.serialNumber || !pos || pos.floorplanId !== floorPlanId) continue;
-    const xPercent = probePercent(pos.xPercent);
-    const yPercent = probePercent(pos.yPercent);
-    if (xPercent != null && yPercent != null) {
-      return { type: 'ap', deviceId: ap.serialNumber, xPercent, yPercent };
-    }
-  }
-  for (const sw of state.switches) {
-    if (!sw.id || sw.floorplanId !== floorPlanId) continue;
-    const xPercent = probePercent(sw.xPercent);
-    const yPercent = probePercent(sw.yPercent);
-    if (xPercent != null && yPercent != null) {
-      return { type: 'switch', deviceId: sw.id, xPercent, yPercent };
-    }
-  }
-  return null;
-}
-
-async function ensurePlacementWriteAccess() {
-  if (state.canWritePositions === true) return { ok: true };
+// Edit mode makes no R1 writes of its own: write access is learned from the
+// first real drop (2xx → writable, 403 → Read Only, and the drop rolls back).
+// A Read Only result is remembered until logout so Edit stays off (QA-012).
+function ensurePlacementWriteAccess() {
   if (state.canWritePositions === false) {
-    return { ok: false, message: ADMIN_SCOPE_MESSAGE };
-  }
-
-  const probeTarget = pickProbeDevice();
-  if (!probeTarget) {
-    // Nothing placed on this floor to re-write safely. Allow edit mode
-    // unverified; the first real move confirms access (403 rolls back).
-    return { ok: true };
-  }
-
-  const result = await window.api.probePlacementWriteAccess({
-    type: probeTarget.type,
-    venueId: state.selectedVenue.id,
-    floorPlanId: state.selectedFloorPlan.id,
-    deviceId: probeTarget.deviceId,
-    xPercent: probeTarget.xPercent,
-    yPercent: probeTarget.yPercent
-  });
-
-  if (!result.success) {
-    if (result.statusCode === 403) {
-      state.canWritePositions = false;
-      return { ok: false, message: ADMIN_SCOPE_MESSAGE };
-    }
-    return { ok: false, message: `Could not verify write access: ${result.error || 'Unknown error'}` };
-  }
-
-  state.canWritePositions = !!result.canWrite;
-  if (!state.canWritePositions) {
     return { ok: false, message: ADMIN_SCOPE_MESSAGE };
   }
   return { ok: true };

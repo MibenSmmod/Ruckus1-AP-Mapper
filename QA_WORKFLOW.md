@@ -92,7 +92,7 @@ npm start
 
 **Goal:** Catch regressions and safety problems before any clicking.
 
-- [ ] `npm test` — all unit tests pass (PoE labels, radio/client merge, paging, 429 retry, image redirects, Edit-mode write allowlist and probe)
+- [ ] `npm test` — all unit tests pass (PoE labels, radio/client merge, paging, 429 retry, image redirects, Edit-mode write allowlist)
 - [ ] `node --check` on `main.js`, `preload.js`, `src/*.js`, `src/api/*.js` — no syntax errors
 - [ ] `npm run prebuild` — no project-root `config.json` / `.env` / `credentials.json`, login inputs empty, `config.json` excluded from `build.files`
 - [ ] Static security checks:
@@ -318,12 +318,14 @@ Getting Started modal itself (test in 4a):
 **GS6.** Edit mode writes real coordinates to RUCKUS One.
 
 **Read Only token**
-- [ ] Edit on a floor with placed devices → Administrator Scope message; Edit stays off
-- [ ] **R1 check:** no device moved
-- [ ] Edit on a floor with **no** placed devices → Edit opens (unverified); dragging an unplaced device onto the map → rejected, device returns to the Unplaced list, Edit turns off, Administrator Scope message
+- [ ] Edit opens (unverified) and **R1 shows no notice or activity-log entry** from turning it on
+- [ ] Drag a placed device → R1 refuses (403): the device is already back at its old spot behind the Administrator Scope message, and Edit is off
+- [ ] Drag an unplaced device onto the map → refused: the device is already back in the Unplaced list behind the message, and Edit is off
+- [ ] Click Edit again (same login) → Administrator Scope message straight away; Edit stays off
+- [ ] **R1 check:** no device moved or placed
 
 **Administrator token**
-- [ ] Turning Edit on → **no device moves in R1** (the access check re-writes a device's current position)
+- [ ] Turning Edit on → **no R1 write**: no "AP was placed" notice and no activity-log entry
 - [ ] Banner + Unplaced Devices panel appear; panel search works
 - [ ] Drag an AP: icon becomes crosshairs while dragging, drop → R1 updated → Refresh / re-enter floor shows the new position
 - [ ] Drag a switch: same as above
@@ -332,7 +334,7 @@ Getting Started modal itself (test in 4a):
 - [ ] Click without moving → no write
 
 **Backend**
-- [ ] R1 activity log shows only the expected position updates (one per drop, plus possibly one for the access check)
+- [ ] R1 activity log shows only the expected position updates (exactly one per drop, none for turning Edit on)
 - [ ] Failed write (e.g. disconnect network, then drop) → error message, and the marker returns to its old position
 
 **Validate:** Move one AP → Refresh / re-enter floor → position persists in R1 → move it back

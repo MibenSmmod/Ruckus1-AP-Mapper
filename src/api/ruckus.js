@@ -651,30 +651,6 @@ class RuckusAPI {
       `/switches/${encodeURIComponent(switchId)}/positions`;
     return this._placementWrite('PUT', path, { floorPlanId, xPercent, yPercent });
   }
-
-  // Probe write scope without moving the device: re-write a device's current
-  // position on this floor (a no-op move). 2xx → writable, 403 → Read Only.
-  // Coordinates must already be valid; they are never clamped, so a bad probe
-  // is refused locally instead of turning into a real move.
-  async probePlacementWriteAccess({ type, venueId, floorPlanId, deviceId, xPercent, yPercent }) {
-    if (!venueId || !floorPlanId || !deviceId) {
-      throw new Error('venueId, floorPlanId, and deviceId are required to probe write access');
-    }
-    if (!isValidPercent(xPercent) || !isValidPercent(yPercent)) {
-      throw new Error('Probe refused: the device\'s current xPercent/yPercent (0–100) are required');
-    }
-    try {
-      if (type === 'switch') {
-        await this.updateSwitchPosition({ venueId, switchId: deviceId, floorPlanId, xPercent, yPercent });
-      } else {
-        await this.updateApFloorPosition({ venueId, floorPlanId, serialNumber: deviceId, xPercent, yPercent });
-      }
-      return { canWrite: true };
-    } catch (error) {
-      if (error.statusCode === 403) return { canWrite: false, statusCode: 403 };
-      throw error;
-    }
-  }
 }
 
 const V1_ACCEPT = 'application/vnd.ruckus.v1+json';
@@ -697,9 +673,6 @@ function clampPercent(value) {
   return Math.min(100, Math.max(0, n));
 }
 
-function isValidPercent(value) {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
-}
 const PORT_FIELDS = [
   'switchName', 'switchSerial', 'switchUnitId', 'portIdentifier', 'name',
   'status', 'poeEnabled', 'poeType', 'poeUsed', 'poeTotal', 'poeUsage',

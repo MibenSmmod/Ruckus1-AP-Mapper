@@ -639,35 +639,6 @@ ipcMain.handle('update-device-position', async (event, params = {}) => {
   }
 });
 
-// FR#18: probe whether the token can write floor positions by re-writing a
-// placed device's current coordinates (no coordinate change).
-ipcMain.handle('probe-placement-write-access', async (event, params = {}) => {
-  try {
-    if (!ruckusClient) {
-      throw new Error('Not authenticated');
-    }
-    const { type, venueId, floorPlanId, deviceId, xPercent, yPercent } = params;
-    if (type !== 'ap' && type !== 'switch') {
-      throw new Error('type must be "ap" or "switch"');
-    }
-    const result = await ruckusClient.probePlacementWriteAccess({
-      type,
-      venueId,
-      floorPlanId,
-      deviceId,
-      xPercent,
-      yPercent
-    });
-    return { success: true, ...result };
-  } catch (error) {
-    return {
-      success: false,
-      error: error.message,
-      statusCode: error.statusCode || null
-    };
-  }
-});
-
 // FR#17: lean tenant device index for Global Search (no radio/clients/PoE)
 ipcMain.handle('build-global-search-index', async (event, { tenantId, venues }) => {
   let run = null;
