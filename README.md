@@ -2,7 +2,7 @@
 
 Desktop app for viewing RUCKUS One access points and switches on venue floor plans, with RF details (channel, bandwidth, transmit power) and optional PoE/LLDP information.  Adds AFC power state if 6GHz is enabled.  This gives you a holistic view of all devices on a floor plan with RF info at a glance.
 
-Major feature:  Move devices from Unplanned in a Venue onto the map with precision.
+Major feature:  Move devices from Unplanned in a Venue onto the map with precision along with adjusting existing device locations.
 
 Map images, floor-plan scale, and device locations are obtained through the RUCKUS One (R1) APIs.
 
